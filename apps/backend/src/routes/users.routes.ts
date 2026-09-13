@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia';
-import { registerUser } from '../services/users.service';
+import { loginUser, registerUser } from '../services/users.service';
 
 export const usersRoutes = new Elysia({ prefix: '' })
   .post(
@@ -41,6 +41,45 @@ export const usersRoutes = new Elysia({ prefix: '' })
         tags: ['Authentication & Users'],
         summary: 'Register a new user',
         description: 'Creates a new user record with hashed password and returns user profile data',
+      },
+    }
+  )
+  .post(
+    '/login',
+    async ({ body, set }) => {
+      try {
+        await loginUser({
+          email: body.email,
+          password: body.password,
+        });
+
+        return {
+          success: true,
+          message: 'User logged in successfully',
+        };
+      } catch (error: any) {
+        if (error?.message === 'Invalid email or password') {
+          set.status = 401;
+          return {
+            error: 'Invalid email or password',
+          };
+        }
+
+        set.status = 500;
+        return {
+          error: 'Internal server error',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        email: t.String({ format: 'email' }),
+        password: t.String({ minLength: 1 }),
+      }),
+      detail: {
+        tags: ['Authentication & Users'],
+        summary: 'Login user',
+        description: 'Validates user credentials and logs in',
       },
     }
   );
