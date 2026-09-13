@@ -1,11 +1,7 @@
-import { pgTable, text, timestamp, uuid, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, jsonb, integer } from 'drizzle-orm/pg-core';
+import { users } from '../models/users.model';
 
-export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  email: text('email').notNull().unique(),
-  name: text('name').notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+export * from '../models/users.model';
 
 export const documents = pgTable('documents', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -15,7 +11,7 @@ export const documents = pgTable('documents', {
     .default('draft')
     .notNull(),
   metadata: jsonb('metadata'),
-  creatorId: uuid('creator_id').references(() => users.id),
+  creatorId: integer('creator_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
