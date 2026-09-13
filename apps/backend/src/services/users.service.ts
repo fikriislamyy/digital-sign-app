@@ -98,3 +98,54 @@ export async function registerUser(input: RegisterUserInput): Promise<Registered
     };
   }
 }
+
+export interface LoginUserInput {
+  email: string;
+  password: string;
+}
+
+/**
+ * Validate user credentials against the database (or in-memory fallback).
+ */
+export async function loginUser(input: LoginUserInput): Promise<true> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const password = input.password;
+
+  try {
+    const existing = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1);
+
+    const user = existing[0];
+    if (!user) {
+      throw new Error('Invalid email or password');
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.password);
+    if (!passwordMatches) {
+      throw new Error('Invalid email or password');
+    }
+
+    return true;
+  } catch (error: any) {
+    if (error?.message === 'Invalid email or password') {
+      throw error;
+    }
+
+    console.warn('[users.service] Database connection error or unavailable, using development memory store fallback:', error?.message);
+
+    const memoryUser = memoryUsers.find((u) => u.email === normalizedEmail);
+    if (!memoryUser) {
+      throw new Error('Invalid email or password');
+    }
+
+    const passwordMatches = await bcrypt.compare(password, memoryUser.password);
+    if (!passwordMatches) {
+      throw new Error('Invalid email or password');
+    }
+
+    return true;
+  }
+}
