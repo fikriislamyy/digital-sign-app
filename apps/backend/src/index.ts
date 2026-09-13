@@ -2,7 +2,8 @@ import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { db } from './db';
-import { documents, signatures, users } from './db/schema';
+import { documents, signatures } from './db/schema';
+import { usersRoutes } from './routes/users.routes';
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
@@ -26,6 +27,7 @@ export const app = new Elysia()
   }))
   .group('/api', (app) =>
     app
+      .use(usersRoutes)
       .get('/health', () => ({
         status: 'ok',
         service: 'digital-sign-backend',
