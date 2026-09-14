@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Backdrop from './Backdrop.svelte';
   import Nav from './Nav.svelte';
   import Hero from './Hero.svelte';
   import Features from './Features.svelte';
@@ -8,6 +9,7 @@
   import Footer from './Footer.svelte';
 </script>
 
+<Backdrop />
 <Nav />
 <main>
   <Hero />

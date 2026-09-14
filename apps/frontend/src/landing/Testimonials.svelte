@@ -1,5 +1,6 @@
 <script lang="ts">
   import { inview } from '../lib/inview';
+  import { spotlight } from '../lib/spotlight';
 
   // ⚠️ PLACEHOLDER COPY — NOT REAL CUSTOMERS.
   // Replace with genuine, written-permission quotes before this page goes live.
@@ -20,28 +21,28 @@
   });
 </script>
 
-<section id="testimonials" class="relative py-24 sm:py-32">
+<section id="testimonials" class="relative border-t border-black/[0.06] py-16 dark:border-white/[0.06] md:py-24 lg:py-32">
   <div class="mx-auto max-w-7xl px-4 sm:px-6">
     <div class="mx-auto max-w-2xl text-center">
-      <h2 class="reveal text-3xl font-extrabold sm:text-5xl" use:inview>
-        Trusted by teams
-        <span class="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">everywhere</span>
+      <p class="reveal font-mono text-xs tracking-widest uppercase text-fg-muted" use:inview>Testimonials</p>
+      <h2 class="reveal mt-3 text-3xl font-semibold sm:text-4xl lg:text-5xl text-fg" use:inview>
+        Trusted by teams everywhere
       </h2>
     </div>
 
-    <div class="reveal mt-12 mx-auto max-w-2xl" use:inview>
-      <div class="rounded-2xl border border-slate-200/70 bg-white/60 p-8 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <p class="text-lg leading-relaxed text-slate-700 dark:text-slate-300">{testimonials[current].quote}</p>
+    <div class="reveal mt-20 mx-auto max-w-2xl" use:inview>
+      <article class="surface spotlight group p-8" use:spotlight>
+        <p class="text-lg leading-relaxed text-fg">{testimonials[current].quote}</p>
         <div class="mt-6 flex items-center gap-4">
-          <div class="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 text-sm font-bold text-white">
+          <div class="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-accent to-indigo-500 text-sm font-bold text-white">
             {testimonials[current].initials}
           </div>
           <div>
-            <p class="font-semibold text-slate-900 dark:text-white">{testimonials[current].name}</p>
-            <p class="text-sm text-slate-600 dark:text-slate-400">{testimonials[current].role}</p>
+            <p class="font-semibold text-fg">{testimonials[current].name}</p>
+            <p class="text-sm text-fg-muted">{testimonials[current].role}</p>
           </div>
         </div>
-      </div>
+      </article>
 
       <div class="mt-6 flex justify-center gap-2" role="group" aria-roledescription="carousel">
         {#each testimonials as _, i}
@@ -49,7 +50,7 @@
             type="button"
             onclick={() => (current = i)}
             aria-label="Show testimonial {i + 1} of {testimonials.length}"
-            class="h-2 w-2 rounded-full transition-all {i === current ? 'bg-emerald-500 w-8' : 'bg-slate-300 dark:bg-slate-600'}"
+            class="h-2 w-2 rounded-full transition-all duration-200 ease-expo {i === current ? 'bg-accent w-8' : 'bg-black/20 dark:bg-white/20'}"
           ></button>
         {/each}
       </div>

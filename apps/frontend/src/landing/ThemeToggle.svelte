@@ -9,7 +9,7 @@
   onclick={() => theme.toggle()}
   aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
   aria-pressed={isDark}
-  class="relative grid h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white/70 backdrop-blur-md transition hover:scale-110 hover:border-emerald-400/60 focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none dark:border-white/10 dark:bg-white/5"
+  class="relative grid h-10 w-10 place-items-center rounded-lg border border-black/[0.06] bg-black/[0.02] transition-all duration-200 ease-expo hover:scale-110 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:outline-none dark:border-white/[0.06] dark:bg-white/[0.02]"
 >
   <!-- Sun and moon are stacked; opacity and rotation cross-fade between them. -->
   <svg
@@ -24,7 +24,7 @@
   </svg>
 
   <svg
-    class="absolute h-5 w-5 text-slate-200 transition-all duration-500 {isDark
+    class="absolute h-5 w-5 text-fg transition-all duration-500 {isDark
       ? 'scale-100 rotate-0 opacity-100'
       : 'scale-50 -rotate-90 opacity-0'}"
     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
