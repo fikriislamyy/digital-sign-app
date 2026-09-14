@@ -1,7 +1,12 @@
 export interface ApiUser {
   id: number;
-  name: string;
   email: string;
+}
+
+export interface AuthResult {
+  user: ApiUser;
+  access_token: string;
+  refresh_token: string;
 }
 
 class ApiError extends Error {}
@@ -28,18 +33,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const login = (email: string, password: string) =>
-  post<{ user: ApiUser; access_token: string; refresh_token: string }>(
-    '/api/login',
-    { email, password }
-  );
+  post<AuthResult>('/api/login', { email, password });
 
 export const register = (input: {
-  name: string;
+  full_name: string;
   email: string;
   password: string;
-  organization?: string;
-  phone?: string;
-}) => post<ApiUser>('/api/register', input);
+  phone_number?: string;
+  organization_name?: string;
+}) => post<AuthResult>('/api/register', input);
 
 export const verifyEmail = (email: string, otp: string) =>
   post<unknown>('/api/verify-email', { email, otp });

@@ -3,6 +3,10 @@
   import Field from './Field.svelte';
   import PasswordField from './PasswordField.svelte';
   import { register } from '../lib/api';
+  import { auth } from '../lib/auth.svelte';
+
+  type Kind = 'personal' | 'organization';
+  let kind = $state<Kind>('personal');
 
   let organization = $state('');
   let fullName = $state('');
@@ -13,9 +17,19 @@
   let formError = $state('');
   let busy = $state(false);
 
+  const tabs: { id: Kind; label: string }[] = [
+    { id: 'personal', label: 'Personal' },
+    { id: 'organization', label: 'Organization' },
+  ];
+
   async function onSubmit(event: SubmitEvent) {
     event.preventDefault();
     formError = '';
+
+    if (kind === 'organization' && !organization.trim()) {
+      formError = 'Enter your organization name.';
+      return;
+    }
 
     if (!fullName.trim()) {
       formError = 'Enter your full name.';
@@ -40,13 +54,15 @@
 
     busy = true;
     try {
-      await register({
-        name: fullName.trim(),
+      const result = await register({
+        full_name: fullName.trim(),
         email: email.trim(),
         password,
-        organization: organization.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone_number: phone.trim() || undefined,
+        organization_name: kind === 'organization' ? organization.trim() : undefined,
       });
+
+      auth.save(result.user, result.access_token, result.refresh_token);
       window.location.hash = `#/verify?email=${encodeURIComponent(email.trim())}`;
     } catch (error) {
       formError = error instanceof Error ? error.message : 'Could not create account.';
@@ -60,10 +76,31 @@
   <h1 class="mb-2 text-4xl font-bold text-fg">Create your account</h1>
   <p class="mb-10 text-fg-muted">Join SignCraft for secure digital signatures.</p>
 
-  <form onsubmit={onSubmit} class="space-y-5" novalidate>
-    <Field label="Organization name" bind:value={organization} placeholder="ACME Inc." />
+  <div role="tablist" aria-label="Account type" class="mb-8 grid grid-cols-2 gap-1 rounded-lg bg-gray-1 p-1 dark:bg-gray-2">
+    {#each tabs as tab}
+      <button
+        type="button"
+        role="tab"
+        id="tab-{tab.id}"
+        aria-selected={kind === tab.id}
+        aria-controls="signup-form"
+        onclick={() => (kind = tab.id)}
+        class="rounded-md px-4 py-2 text-sm font-medium transition-colors duration-300 {kind === tab.id
+          ? 'bg-bg-elevated text-fg shadow-card'
+          : 'text-fg-muted hover:text-fg'}"
+      >
+        {tab.label}
+      </button>
+    {/each}
+  </div>
+
+  <div role="tabpanel" aria-labelledby="tab-{kind}">
+    <form id="signup-form" onsubmit={onSubmit} class="space-y-5" novalidate>
+    {#if kind === 'organization'}
+      <Field label="Organization name" bind:value={organization} placeholder="Acme Inc." required />
+    {/if}
     <Field label="Full name" bind:value={fullName} placeholder="Jane Doe" required />
-    <Field label="Phone number" bind:value={phone} placeholder="+1 (555) 123-4567" />
+    <Field label="Phone number" type="tel" bind:value={phone} placeholder="+628123456789" />
     <Field label="Email" type="email" bind:value={email} placeholder="jane@acme.com" required />
     <PasswordField label="Password" bind:value={password} placeholder="••••••••" />
     <PasswordField label="Confirm password" bind:value={confirmPassword} placeholder="••••••••" />
@@ -81,7 +118,8 @@
     >
       {busy ? 'Creating account…' : 'Sign up'}
     </button>
-  </form>
+    </form>
+  </div>
 
   <p class="mt-8 text-center text-sm text-fg-muted">
     Already have an account?

@@ -24,7 +24,7 @@
     busy = true;
     try {
       await verifyEmail(email, code.trim());
-      window.location.hash = '#/login';
+      window.location.hash = '#/app';
     } catch (error) {
       formError = error instanceof Error ? error.message : 'Could not verify that code.';
     } finally {

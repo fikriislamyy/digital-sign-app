@@ -4,19 +4,23 @@ import { db } from '../db';
 import { users } from '../models/users.model';
 import { createAndSendOtp } from './email-verification.service';
 import { createSession, signAccessToken, generateRefreshToken } from './sessions.service';
+import { createOrganization } from './organizations.service';
 
 export interface RegisterUserInput {
-  name: string;
+  fullName: string;
   email: string;
   password: string;
-  organization?: string;
-  phone?: string;
+  organizationName?: string;
+  phoneNumber?: string;
 }
 
-export interface RegisteredUserResult {
-  id: number;
-  name: string;
-  email: string;
+export interface LoginUserResult {
+  user: {
+    id: number;
+    email: string;
+  };
+  accessToken: string;
+  refreshToken: string;
 }
 
 // In-memory fallback for local dev when PostgreSQL is offline
@@ -25,54 +29,81 @@ interface InMemoryUser {
   name: string;
   email: string;
   password: string;
+  type: string;
+  organizationId: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
+interface InMemoryOrganization {
+  id: number;
+  name: string;
+  slug: string;
+  ownerId: number;
+}
+
 const memoryUsers: InMemoryUser[] = [];
+const memoryOrganizations: InMemoryOrganization[] = [];
 let memoryIdCounter = 1;
+let memoryOrgIdCounter = 1;
 
 /**
  * Register a new user with hashed password and unique email validation.
  */
-export async function registerUser(input: RegisterUserInput): Promise<RegisteredUserResult> {
+export async function registerUser(input: RegisterUserInput): Promise<LoginUserResult> {
   const normalizedEmail = input.email.trim().toLowerCase();
-  const name = input.name.trim();
+  const name = input.fullName.trim();
   const password = input.password;
+  const organizationName = input.organizationName?.trim() || undefined;
 
   try {
-    // 1. Check if user already exists in PostgreSQL
-    const existing = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .limit(1);
+    const user = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, normalizedEmail))
+        .limit(1);
 
-    if (existing.length > 0) {
-      throw new Error('Email already registered');
-    }
+      if (existing) throw new Error('Email already registered');
 
-    // 2. Hash plain text password with bcrypt
-    const hashedPassword = await bcrypt.hash(password, 10);
+      const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 3. Insert new user into database
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        name,
-        organization: input.organization?.trim(),
-        phone: input.phone?.trim(),
-        email: normalizedEmail,
-        password: hashedPassword,
-      })
-      .returning();
+      // Insert the owner first with no organization. The organization needs
+      // owner_id, so it cannot go first. See section 3.1.
+      const [created] = await tx
+        .insert(users)
+        .values({
+          name,
+          phone: input.phoneNumber?.trim(),
+          email: normalizedEmail,
+          password: hashedPassword,
+          type: organizationName ? 'OWNER' : 'PERSONAL',
+        })
+        .returning();
 
-    await createAndSendOtp(newUser.id, newUser.email);
+      if (!organizationName) return created;
+
+      const organization = await createOrganization(tx, organizationName, created.id);
+
+      const [updated] = await tx
+        .update(users)
+        .set({ organizationId: organization.id })
+        .where(eq(users.id, created.id))
+        .returning();
+
+      return updated;
+    });
+
+    // Outside the transaction. Neither should undo a committed registration:
+    // a failed email is retried with resend-otp, and a failed session means the
+    // user simply logs in.
+    await createAndSendOtp(user.id, user.email);
+    const session = await createSession(user.id);
 
     return {
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
+      user: { id: user.id, email: user.email },
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
     };
   } catch (error: any) {
     // If it's a known domain validation error, propagate immediately
@@ -94,15 +125,29 @@ export async function registerUser(input: RegisterUserInput): Promise<Registered
       name,
       email: normalizedEmail,
       password: hashedPassword,
+      type: organizationName ? 'OWNER' : 'PERSONAL',
+      organizationId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+
+    if (organizationName) {
+      const org: InMemoryOrganization = {
+        id: memoryOrgIdCounter++,
+        name: organizationName,
+        slug: organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+        ownerId: inMemoryUser.id,
+      };
+      memoryOrganizations.push(org);
+      inMemoryUser.organizationId = org.id;
+    }
+
     memoryUsers.push(inMemoryUser);
 
     return {
-      id: inMemoryUser.id,
-      name: inMemoryUser.name,
-      email: inMemoryUser.email,
+      user: { id: inMemoryUser.id, email: inMemoryUser.email },
+      accessToken: await signAccessToken(inMemoryUser.id),
+      refreshToken: generateRefreshToken(),
     };
   }
 }
@@ -110,15 +155,6 @@ export async function registerUser(input: RegisterUserInput): Promise<Registered
 export interface LoginUserInput {
   email: string;
   password: string;
-}
-
-export interface LoginUserResult {
-  user: {
-    id: number;
-    email: string;
-  };
-  accessToken: string;
-  refreshToken: string;
 }
 
 /**
