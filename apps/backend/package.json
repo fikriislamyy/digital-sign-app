@@ -12,10 +12,11 @@
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
     "@elysiajs/swagger": "^1.2.0",
+    "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.38.4",
     "elysia": "^1.2.14",
-    "postgres": "^3.4.5",
-    "bcryptjs": "^2.4.3"
+    "jose": "^6.2.12",
+    "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
