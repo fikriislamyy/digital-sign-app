@@ -1,11 +1,11 @@
-import { Elysia, t } from 'elysia';
+import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
-import { db } from './db';
 import { redis } from './db/redis';
-import { documents, signatures } from './db/schema';
 import { usersRoutes } from './routes/users.routes';
 import { emailVerificationRoutes } from './routes/email-verification.routes';
+import { sessionsRoutes } from './routes/sessions.routes';
+import { dashboardRoutes } from './routes/dashboard.routes';
 import { checkMailTransport } from './services/mail.service';
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
@@ -32,6 +32,8 @@ export const app = new Elysia()
     app
       .use(usersRoutes)
       .use(emailVerificationRoutes)
+      .use(sessionsRoutes)
+      .use(dashboardRoutes)
       .get('/health', async () => {
         const [redisStatus, mailStatus] = await Promise.all([
           redis.ping().then(() => 'ok' as const).catch(() => 'down' as const),
@@ -46,65 +48,6 @@ export const app = new Elysia()
           mail: mailStatus,
         };
       })
-      .get('/documents', async () => {
-        try {
-          const docs = await db.select().from(documents).limit(20);
-          return { success: true, data: docs };
-        } catch {
-          // Fallback if DB container is not yet started in dev
-          return {
-            success: true,
-            data: [
-              {
-                id: 'demo-doc-1',
-                title: 'Non-Disclosure Agreement (NDA)',
-                status: 'pending',
-                createdAt: new Date().toISOString(),
-              },
-              {
-                id: 'demo-doc-2',
-                title: 'Employment Contract - 2026',
-                status: 'signed',
-                createdAt: new Date().toISOString(),
-              },
-            ],
-            notice: 'Running in demo mode (Postgres offline or configuring). Start DB with `bun run db:up`.',
-          };
-        }
-      })
-      .post(
-        '/documents',
-        async ({ body }) => {
-          try {
-            const [created] = await db
-              .insert(documents)
-              .values({
-                title: body.title,
-                status: 'draft',
-                metadata: body.metadata,
-              })
-              .returning();
-            return { success: true, data: created };
-          } catch {
-            return {
-              success: true,
-              data: {
-                id: crypto.randomUUID(),
-                title: body.title,
-                status: 'draft',
-                createdAt: new Date().toISOString(),
-              },
-              notice: 'Recorded in transient state',
-            };
-          }
-        },
-        {
-          body: t.Object({
-            title: t.String(),
-            metadata: t.Optional(t.Any()),
-          }),
-        }
-      )
   )
   .listen(port);
 

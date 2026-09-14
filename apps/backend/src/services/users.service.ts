@@ -1,10 +1,12 @@
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
-import { users } from '../models/users.model';
+import { users, type User } from '../models/users.model';
+import { organizations } from '../models/organizations.model';
 import { createAndSendOtp } from './email-verification.service';
 import { createSession, signAccessToken, generateRefreshToken } from './sessions.service';
 import { createOrganization } from './organizations.service';
+import { WALLET_CURRENCY } from '../utils/wallet.util';
 
 export interface RegisterUserInput {
   fullName: string;
@@ -212,4 +214,27 @@ export async function loginUser(input: LoginUserInput): Promise<LoginUserResult>
       refreshToken: generateRefreshToken(),
     };
   }
+}
+
+export async function getProfile(user: User) {
+  const organization = user.organizationId
+    ? (await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1))[0] ?? null
+    : null;
+
+  let balance = user.balance;
+  if (user.type !== 'PERSONAL' && user.type !== 'OWNER' && organization) {
+    const [owner] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, organization.ownerId)).limit(1);
+    if (owner) balance = owner.balance;
+  }
+
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      type: user.type,
+      organization: organization ? { id: organization.id, name: organization.name, slug: organization.slug } : null,
+    },
+    wallet: { balance, currency: WALLET_CURRENCY },
+  };
 }

@@ -1,25 +1,14 @@
 import { SignJWT } from 'jose';
+import { and, eq, gt } from 'drizzle-orm';
 import { db } from '../db';
 import { sessions } from '../models/sessions.model';
+import { jwtSecret } from '../utils/jwt.util';
 
 /** How long an access token stays valid. */
 export const ACCESS_TOKEN_TTL_MINUTES = 15;
 
 /** How long a refresh token, and therefore the session row, stays valid. */
 export const REFRESH_TOKEN_TTL_DAYS = 7;
-
-/**
- * The signing key for access tokens.
- * Anyone with this value can forge a token for any user, so it must come
- * from the environment and must differ per environment.
- */
-const jwtSecret = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? 'dev-only-insecure-secret-change-me'
-);
-
-if (!process.env.JWT_SECRET) {
-  console.warn('[sessions.service] JWT_SECRET is not set. Using an insecure development default.');
-}
 
 /**
  * Build an opaque refresh token: 32 random bytes as 64 hex characters.
@@ -73,4 +62,22 @@ export async function createSession(userId: number): Promise<CreatedSession> {
   });
 
   return { accessToken, refreshToken, expiresAt };
+}
+
+export async function revokeSession(refreshToken: string): Promise<boolean> {
+  const deleted = await db.delete(sessions).where(eq(sessions.refreshToken, refreshToken)).returning({ id: sessions.id });
+  return deleted.length > 0;
+}
+
+export async function refreshAccessToken(refreshToken: string): Promise<string | null> {
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.refreshToken, refreshToken), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+  if (!session) return null;
+
+  const accessToken = await signAccessToken(session.userId);
+  await db.update(sessions).set({ accessToken }).where(eq(sessions.id, session.id));
+  return accessToken;
 }

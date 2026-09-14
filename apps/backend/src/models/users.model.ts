@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, integer, timestamp, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, integer, numeric, timestamp, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { organizations } from './organizations.model';
 
 export const USER_TYPES = ['OWNER', 'PERSONAL', 'MEMBER', 'ADMIN'] as const;
@@ -12,6 +12,7 @@ export const users = pgTable('users', {
   password: varchar('password', { length: 255 }).notNull(),
   type: varchar('type', { length: 20, enum: USER_TYPES }).notNull().default('PERSONAL'),
   organizationId: integer('organization_id').references((): AnyPgColumn => organizations.id),
+  balance: numeric('balance', { precision: 14, scale: 2 }).notNull().default('0'),
   verifiedAt: timestamp('verified_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
