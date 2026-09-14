@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { users } from '../models/users.model';
+import { createAndSendOtp } from './email-verification.service';
 
 export interface RegisterUserInput {
   name: string;
@@ -60,6 +61,8 @@ export async function registerUser(input: RegisterUserInput): Promise<Registered
         password: hashedPassword,
       })
       .returning();
+
+    await createAndSendOtp(newUser.id, newUser.email);
 
     return {
       id: newUser.id,
