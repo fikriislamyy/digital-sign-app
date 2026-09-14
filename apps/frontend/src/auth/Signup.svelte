@@ -2,6 +2,7 @@
   import AuthLayout from './AuthLayout.svelte';
   import Field from './Field.svelte';
   import PasswordField from './PasswordField.svelte';
+  import Tabs from '../ui/Tabs.svelte';
   import { register } from '../lib/api';
   import { auth } from '../lib/auth.svelte';
   import { router } from '../lib/router.svelte';
@@ -18,7 +19,7 @@
   let formError = $state('');
   let busy = $state(false);
 
-  const tabs: { id: Kind; label: string }[] = [
+  const accountTypes: { id: Kind; label: string }[] = [
     { id: 'personal', label: 'Personal' },
     { id: 'organization', label: 'Organization' },
   ];
@@ -77,50 +78,34 @@
   <h1 class="mb-2 text-4xl font-bold text-fg">Create your account</h1>
   <p class="mb-10 text-fg-muted">Join SignCraft for secure digital signatures.</p>
 
-  <div role="tablist" aria-label="Account type" class="mb-8 grid grid-cols-2 gap-1 rounded-lg bg-gray-1 p-1 dark:bg-gray-2">
-    {#each tabs as tab}
+  <Tabs bind:value={kind} label="Account type" listClass="mb-8 grid grid-cols-2" items={accountTypes}>
+    {#snippet children(active)}
+      <form id="signup-form" onsubmit={onSubmit} class="space-y-5" novalidate>
+      {#if active === 'organization'}
+        <Field label="Organization name" bind:value={organization} placeholder="Acme Inc." required />
+      {/if}
+      <Field label="Full name" bind:value={fullName} placeholder="Jane Doe" required />
+      <Field label="Phone number" type="tel" bind:value={phone} placeholder="+628123456789" />
+      <Field label="Email" type="email" bind:value={email} placeholder="jane@acme.com" required />
+      <PasswordField label="Password" bind:value={password} placeholder="••••••••" />
+      <PasswordField label="Confirm password" bind:value={confirmPassword} placeholder="••••••••" />
+
+      {#if formError}
+        <p role="alert" class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+          {formError}
+        </p>
+      {/if}
+
       <button
-        type="button"
-        role="tab"
-        id="tab-{tab.id}"
-        aria-selected={kind === tab.id}
-        aria-controls="signup-form"
-        onclick={() => (kind = tab.id)}
-        class="rounded-md px-4 py-2 text-sm font-medium transition-colors duration-300 {kind === tab.id
-          ? 'bg-bg-elevated text-fg shadow-card'
-          : 'text-fg-muted hover:text-fg'}"
+        type="submit"
+        disabled={busy}
+        class="w-full rounded-lg bg-accent px-6 py-3.5 font-semibold text-white transition-opacity duration-300 hover:opacity-90 disabled:opacity-50"
       >
-        {tab.label}
+        {busy ? 'Creating account…' : 'Sign up'}
       </button>
-    {/each}
-  </div>
-
-  <div role="tabpanel" aria-labelledby="tab-{kind}">
-    <form id="signup-form" onsubmit={onSubmit} class="space-y-5" novalidate>
-    {#if kind === 'organization'}
-      <Field label="Organization name" bind:value={organization} placeholder="Acme Inc." required />
-    {/if}
-    <Field label="Full name" bind:value={fullName} placeholder="Jane Doe" required />
-    <Field label="Phone number" type="tel" bind:value={phone} placeholder="+628123456789" />
-    <Field label="Email" type="email" bind:value={email} placeholder="jane@acme.com" required />
-    <PasswordField label="Password" bind:value={password} placeholder="••••••••" />
-    <PasswordField label="Confirm password" bind:value={confirmPassword} placeholder="••••••••" />
-
-    {#if formError}
-      <p role="alert" class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-        {formError}
-      </p>
-    {/if}
-
-    <button
-      type="submit"
-      disabled={busy}
-      class="w-full rounded-lg bg-accent px-6 py-3.5 font-semibold text-white transition-opacity duration-300 hover:opacity-90 disabled:opacity-50"
-    >
-      {busy ? 'Creating account…' : 'Sign up'}
-    </button>
-    </form>
-  </div>
+      </form>
+    {/snippet}
+  </Tabs>
 
   <p class="mt-8 text-center text-sm text-fg-muted">
     Already have an account?

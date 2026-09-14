@@ -1,10 +1,13 @@
 <script lang="ts">
   import AuthLayout from './AuthLayout.svelte';
+  import PinField from '../ui/PinField.svelte';
   import { verifyEmail, resendOtp } from '../lib/api';
   import { router } from '../lib/router.svelte';
   import { auth } from '../lib/auth.svelte';
 
   const email = router.query.get('email') ?? '';
+
+  let form = $state<HTMLFormElement>();
 
   let code = $state('');
   let formError = $state('');
@@ -56,20 +59,8 @@
   {#if email}
     <p class="mb-6 text-sm text-fg-muted">We sent a code to <span class="font-medium text-fg">{email}</span></p>
 
-    <form onsubmit={onSubmit} class="space-y-5" novalidate>
-      <div>
-        <label for="code" class="mb-2 block text-sm font-medium text-fg">Verification code</label>
-        <input
-          id="code"
-          bind:value={code}
-          inputmode="numeric"
-          autocomplete="one-time-code"
-          maxlength="6"
-          placeholder="000000"
-          class="input text-center font-mono text-3xl tracking-[0.5em]"
-          aria-invalid={formError ? 'true' : undefined}
-        />
-      </div>
+    <form bind:this={form} onsubmit={onSubmit} class="space-y-5" novalidate>
+      <PinField bind:value={code} label="Verification code" error={formError ? ' ' : ''} oncomplete={() => form?.requestSubmit()} />
 
       {#if formError}
         <p role="alert" class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
