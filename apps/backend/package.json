@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "bun --watch src/index.ts",
+    "dev": "bun --env-file=../../.env --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
-    "start": "bun src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
@@ -16,6 +16,7 @@
     "drizzle-orm": "^0.38.4",
     "elysia": "^1.2.14",
     "jose": "^6.2.12",
+    "nodemailer": "^10.0.9",
     "postgres": "^3.4.5"
   },
   "devDependencies": {

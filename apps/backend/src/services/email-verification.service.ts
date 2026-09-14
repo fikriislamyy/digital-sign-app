@@ -1,7 +1,9 @@
-import { and, count, eq, gt } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { db } from '../db';
+import { redis } from '../db/redis';
 import { users } from '../models/users.model';
 import { otpCodes } from '../models/otp-codes.model';
+import { sendMail } from './mail.service';
 
 /** How long a code stays usable. */
 export const OTP_TTL_MINUTES = 30;
@@ -23,11 +25,18 @@ export function generateOtpCode(): string {
 }
 
 /**
- * Placeholder for the real mail transport.
- * Swap the body for an actual provider later. The call signature stays the same.
+ * Send an OTP email to the user.
  */
 export async function sendOtpEmail(email: string, code: string): Promise<void> {
-  console.log(`[email-verification] OTP for ${email}: ${code}`);
+  try {
+    await sendMail({
+      to: email,
+      subject: 'Your SignCraft verification code',
+      text: `Your verification code is ${code}. It expires in ${OTP_TTL_MINUTES} minutes.`,
+    });
+  } catch (error) {
+    console.error(`[email-verification] Could not send OTP email to ${email}:`, (error as Error).message);
+  }
 }
 
 /**
@@ -123,14 +132,13 @@ export async function resendOtp(input: ResendOtpInput): Promise<true> {
     throw new Error('Email already verified');
   }
 
-  const windowStart = new Date(Date.now() - OTP_RESEND_WINDOW_MINUTES * 60 * 1000);
+  const key = `otp:resend:${user.id}`;
+  const attempts = await redis.incr(key);
+  // NX: set the expiry only if the key has none, so a key never lives forever
+  // when a previous EXPIRE was lost, and never gets its window extended.
+  await redis.send('EXPIRE', [key, String(OTP_RESEND_WINDOW_MINUTES * 60), 'NX']);
 
-  const [{ value: recentCount }] = await db
-    .select({ value: count() })
-    .from(otpCodes)
-    .where(and(eq(otpCodes.userId, user.id), gt(otpCodes.createdAt, windowStart)));
-
-  if (recentCount >= OTP_RESEND_LIMIT) {
+  if (attempts > OTP_RESEND_LIMIT) {
     throw new Error('Too many OTP requests');
   }
 

@@ -2,9 +2,11 @@ import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { db } from './db';
+import { redis } from './db/redis';
 import { documents, signatures } from './db/schema';
 import { usersRoutes } from './routes/users.routes';
 import { emailVerificationRoutes } from './routes/email-verification.routes';
+import { checkMailTransport } from './services/mail.service';
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
@@ -30,11 +32,20 @@ export const app = new Elysia()
     app
       .use(usersRoutes)
       .use(emailVerificationRoutes)
-      .get('/health', () => ({
-        status: 'ok',
-        service: 'digital-sign-backend',
-        timestamp: new Date().toISOString(),
-      }))
+      .get('/health', async () => {
+        const [redisStatus, mailStatus] = await Promise.all([
+          redis.ping().then(() => 'ok' as const).catch(() => 'down' as const),
+          checkMailTransport().then((ok) => (ok ? 'ok' : 'down')).catch(() => 'down' as const),
+        ]);
+
+        return {
+          status: 'ok',
+          service: 'digital-sign-backend',
+          timestamp: new Date().toISOString(),
+          redis: redisStatus,
+          mail: mailStatus,
+        };
+      })
       .get('/documents', async () => {
         try {
           const docs = await db.select().from(documents).limit(20);

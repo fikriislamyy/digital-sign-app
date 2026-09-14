@@ -12,6 +12,6 @@
     "build": "bun --filter '*' build",
     "db:generate": "bun --filter backend db:generate",
     "db:migrate": "bun --filter backend db:migrate",
-    "db:up": "docker compose up -d"
+    "db:up": "docker compose up -d --wait"
   }
 }
