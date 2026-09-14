@@ -1,5 +1,6 @@
 <script lang="ts">
   import { auth } from '../../lib/auth.svelte';
+  import { router } from '../../lib/router.svelte';
   import { logout, refresh } from '../../lib/api';
   import type { UserProfile } from '../../lib/api';
 
@@ -12,10 +13,9 @@
 
     try {
       await logout(refreshToken);
+    } finally {
       auth.clear();
-      window.location.hash = '#/';
-    } catch (error) {
-      console.error('Logout failed:', error);
+      router.navigate('/');
     }
   }
 </script>

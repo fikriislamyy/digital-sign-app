@@ -4,6 +4,7 @@
   import PasswordField from './PasswordField.svelte';
   import { login } from '../lib/api';
   import { auth } from '../lib/auth.svelte';
+  import { router } from '../lib/router.svelte';
 
   let email = $state('');
   let password = $state('');
@@ -22,8 +23,9 @@
     busy = true;
     try {
       const result = await login(email.trim(), password);
-      auth.save(result.user, result.access_token, result.refresh_token);
-      window.location.hash = '#/app';
+      auth.save(result.access_token, result.refresh_token);
+      await auth.loadProfile();
+      router.navigate('/dashboard');
     } catch (error) {
       formError = error instanceof Error ? error.message : 'Could not sign in.';
     } finally {
@@ -57,6 +59,6 @@
 
   <p class="mt-8 text-center text-sm text-fg-muted">
     No account?
-    <a href="#/signup" class="font-medium text-accent transition-opacity duration-300 hover:opacity-80">Create one</a>
+    <a href="/signup" class="font-medium text-accent transition-opacity duration-300 hover:opacity-80">Create one</a>
   </p>
 </AuthLayout>

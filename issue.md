@@ -1,1348 +1,1045 @@
-# Feature: Logout, Route Guards, App Shell, and Dashboard
+# Feature: Melt UI components, real URLs, responsive pages
 
 **Audience:** junior developer, or a cheaper AI model, working in this repository.
-**Estimated effort:** 3–4 days. Ship it as three pull requests, one per phase below. Each phase leaves the app working.
-**Prerequisite reading:** `apps/backend/src/routes/users.routes.ts`, `apps/backend/src/services/sessions.service.ts`, `apps/frontend/src/App.svelte`, `apps/frontend/src/lib/auth.svelte.ts`, `apps/frontend/src/lib/api.ts`.
+**Estimated effort:** 2–3 days. Ship it as three pull requests, one per phase below. Each phase leaves the app working.
+**Prerequisite reading:** `apps/frontend/src/App.svelte`, `apps/frontend/src/lib/auth.svelte.ts`, `apps/frontend/src/app.css`, `apps/frontend/src/auth/Signup.svelte`, `apps/frontend/src/app/AppLayout.svelte`.
+
+The previous version of this file (the logout / app shell / dashboard plan) is in git history at commit `9b0628d`. That work is done and merged; this file replaces it.
 
 ---
 
 ## 1. What we are building
 
-**Phase A — backend.** A `POST /api/logout` endpoint, a bearer-token middleware for protected routes, a `GET /api/me` endpoint the app shell needs, a real `documents` table, two dashboard data endpoints, and the folder structure the specification mandates (`controller/`, `middleware/`, `validator/`, `dto/`, `interface/`, `utils/`).
+**Phase A — real URLs.** Replace hash routing (`/#/app/dashboard`) with History API routing (`/dashboard`). One new file, one deleted file, and every link in the app rewritten. Also fixes a bug where logging in bounces the user straight back to the login page (see 3.4).
 
-**Phase B — app shell.** Route guards in the frontend router; an authenticated layout with a navbar (user menu with logout, theme toggle, wallet) and a role-aware sidebar; the old `#/app` demo page removed; `/` sending logged-in users to the dashboard and everyone else to the landing page.
+**Phase B — Melt UI wrappers + auth pages.** Install `melt`, write six small wrapper components in `src/ui/`, then use them on the login, signup, and verification pages.
 
-**Phase C — dashboard.** Greeting and live clock, a time-range filter, four stat cards, a line chart with peak and average, a status pie, and the five most recent documents.
+**Phase C — landing page and dashboard.** Use the same wrappers on the landing page (mobile menu, theme toggle, testimonial carousel) and in the app shell (mobile sidebar drawer, user menu, theme toggle, time-range filter, chart tooltips). Make the app shell usable on a phone, which it currently is not.
 
-Everything below has been checked against the installed versions: Elysia 1.4.30, Drizzle 0.38, Svelte 5, Bun 1.4.2, PostgreSQL 16 in Docker. Where a snippet is marked *verified*, it was run.
+Rules that apply to every phase:
+
+- **No new colors.** Every color comes from the tokens already in `app.css` (`bg-bg-base`, `bg-bg-elevated`, `text-fg`, `text-fg-muted`, `bg-accent`, `border-gray-1`, `dark:border-gray-2`, the `.surface` and `.input` classes). See 3.5 for the one place this changes existing code.
+- **Every page must work at 375px wide** (iPhone SE) and at 1440px. Chrome DevTools device toolbar, ⌘⇧M / Ctrl⇧M. Section 7 lists what to check.
+- **`bun run check` in `apps/frontend` must report 0 errors** when you are done. Today it reports 2 errors and 16 warnings (see 3.6). Do not add warnings; remove the ones in files you touch.
+
+Everything below was checked against the installed versions: Svelte 5.57.0, Vite 6.4.3, `@sveltejs/vite-plugin-svelte` 4.0.4, Tailwind 4.3.3, Bun 1.4.2, and `melt` 0.44.0. Where a snippet is marked *verified*, it was compiled with `svelte-check` and executed in headless Chromium.
 
 ---
 
 ## 2. Contracts
 
-### `POST /api/logout` — public
+### 2.1 URLs after Phase A
 
-```
-{ "refresh_token": "…" }
-```
-
-| Status | Body |
-| --- | --- |
-| 200 | `{ "success": true, "message": "User logged out successfully" }` |
-| 401 | `{ "error": "Invalid token" }` |
-
-Deletes the session row whose `refresh_token` matches. No `Authorization` header is required — see 3.4.
-
-### `POST /api/refresh` — public *(not in the spec; see 3.5)*
-
-```
-{ "refresh_token": "…" }
-```
-
-| Status | Body |
-| --- | --- |
-| 200 | `{ "success": true, "data": { "access_token": "…" } }` |
-| 401 | `{ "error": "Invalid token" }` |
-
-### `GET /api/me` — protected
-
-```json
-{
-  "success": true,
-  "data": {
-    "user": { "id": 6, "name": "John Smith", "email": "john@acme.com", "type": "OWNER",
-              "organization": { "id": 1, "name": "Acme Inc", "slug": "acme-inc" } },
-    "wallet": { "balance": "0.00", "currency": "USD" }
-  }
-}
-```
-
-`organization` is `null` for `PERSONAL` users. `wallet` is the owner's balance when the user is not `PERSONAL` (see 3.6).
-
-### `GET /api/dashboard/analytics?from=&to=&tz=&granularity=` — protected
-
-`from`/`to` are ISO instants, `tz` is an IANA zone such as `Asia/Jakarta`, `granularity` is `hour` | `day` | `month`.
-
-```json
-{
-  "success": true,
-  "data": {
-    "totals": { "uploaded": 12, "draft": 4, "sent": 5, "completed": 3 },
-    "series": [ { "bucket": "2026-09-14T06:00:00", "count": 1 }, … ]
-  }
-}
-```
-
-`bucket` is wall-clock time in `tz`, with no offset suffix. Buckets with zero documents are absent; the frontend fills them in.
-
-### `GET /api/dashboard/recent` — protected
-
-```json
-{ "success": true, "data": [ { "id": "…", "title": "…", "status": "sent", "createdAt": "2026-09-14T01:15:00.000Z" }, … ] }
-```
-
-The five newest documents of the current user, any date.
-
-Every protected endpoint answers `401 { "error": "Unauthorized" }` without a valid `Authorization: Bearer <access_token>` header.
-
----
-
-## 3. Things in the specification that need settling
-
-### 3.1 The four redirect rules contradict each other
-
-As written:
-
-1. guest on a guest route → landing page
-2. auth on an auth route → dashboard
-3. guest on an auth route → landing page
-4. auth on a guest route → dashboard
-
-Rules 1 and 2 would make the app unusable: a guest could never reach the login page, and a logged-in user could never stay on the dashboard. What the later paragraph actually asks for is `/`: logged-in users go to the dashboard, everyone else sees the landing page. So the rules are:
-
-| Route kind | Examples | Guest | Logged in |
-| --- | --- | --- | --- |
-| root | `#/`, empty hash, in-page anchors like `#pricing` | landing page | redirect to `#/dashboard` |
-| guest | `#/login`, `#/signup` | allowed | redirect to `#/dashboard` |
-| open | `#/verify` | allowed | allowed |
-| auth | `#/dashboard`, `#/documents`, … everything else under `#/` | redirect to `#/` | allowed |
-
-`#/verify` is **open**, not guest: issue 15 made signup store a session before sending the user to the verify screen, so a freshly signed-up user is logged in *and* needs that page. Classifying it as guest would bounce them to the dashboard before they could enter the code. (Whether unverified users should be kept out of the dashboard is a separate question this ticket does not answer.)
-
-### 3.2 "Middleware" is two different things
-
-Redirects happen in the browser; the backend never redirects an API call. So:
-
-- **Backend middleware** (`middleware/auth.middleware.ts`) reads the bearer token, loads the user, and answers 401 when either is missing. It protects `/me` and the dashboard endpoints.
-- **Frontend guard** lives in `App.svelte` and implements the table in 3.1.
-
-Both are built. Neither replaces the other.
-
-### 3.3 The `documents` table does not exist
-
-It is declared in `db/schema.ts` but was never created — `\d documents` in the database returns nothing, and today's `GET /api/documents` silently serves demo data. So this ticket creates it with a migration, which also lets us fix two things while nothing depends on it:
-
-- **Statuses become `draft`, `sent`, `completed`**, the three the dashboard counts. The old `pending`/`signed`/`rejected` set had no consumer.
-- **`created_at` is `TIMESTAMPTZ`**, not `TIMESTAMP`. The analytics groups documents by hour and day *in the user's timezone*, and that arithmetic is only unambiguous on a column that stores an instant. Every other table keeps `TIMESTAMP`; only this one does time math.
-
-The two demo endpoints in `index.ts` are deleted along with the demo fallback. The `documents` definition moves from `db/schema.ts` to `models/documents.model.ts`; `signatures` stays where it is and imports it from there.
-
-### 3.4 Logout is keyed on the refresh token alone
-
-The spec's request body has only `refresh_token`. Access tokens expire after 15 minutes; if logout required one, a user with an expired access token could not log out. The refresh token is a 256-bit secret, so it is sufficient on its own. The frontend clears its stored tokens whether or not the call succeeds.
-
-### 3.5 Without a refresh endpoint the app logs everyone out after 15 minutes
-
-Not in the spec, but a consequence of this ticket: the dashboard is the first screen that calls protected endpoints, and access tokens last 15 minutes. With no way to renew one, every user is bounced to the login page a quarter of an hour after signing in. `POST /api/refresh` is small — it lives in the same files as logout — and the frontend's `authFetch` (step B1) retries once through it before giving up. **This is included.** If the reviewer wants it out, delete step A5's refresh handler and the retry in `authFetch`; the rest stands.
-
-### 3.6 There is no wallet anywhere
-
-No balance column exists on any table. The spec's rule — "if user type is not personal, use owner balance" — settles the shape: the balance belongs to a user, and organization members read their owner's. So:
-
-- migration adds `users.balance NUMERIC(14,2) NOT NULL DEFAULT 0`
-- `/me` resolves it: `PERSONAL` and `OWNER` return their own row's balance; `MEMBER` and `ADMIN` return the balance of `organizations.owner_id`
-- currency is unspecified. `utils/wallet.util.ts` exports `WALLET_CURRENCY = 'USD'`; changing it is one line. The frontend formats with `Intl.NumberFormat`.
-
-Nothing in this ticket changes a balance. "Top up" is a placeholder page.
-
-### 3.7 Thirteen sidebar pages, one of which is specified
-
-Only Dashboard has content. The other twelve (Documents, Templates, Top up, Usage, Plan history, Member list, Invitations, Profile, Security, Notifications, Api keys, Delete account) get one shared `Placeholder.svelte` that shows the page title and "Coming soon". They exist so the sidebar links go somewhere and the role rules in the sidebar can be tested.
-
-### 3.8 Peak and average are underspecified for half the filters
-
-The spec defines peak hour for today/yesterday, peak day for weeks, peak week for months, and nothing for years. The chart is described as "last 7 days" but is also "affected by the filter". This table is the whole definition; the frontend implements it in one file (`dashboard/range.ts`):
-
-| Filter | Range (browser timezone) | Chart buckets | Peak | Average |
-| --- | --- | --- | --- | --- |
-| today, yesterday | that calendar day | 24 hours | **peak hour** 0–23 | per hour = total ÷ 24 |
-| this week, last week | Monday 00:00 → next Monday | 7 days | **peak day** 1–7, Monday = 1 | per day = total ÷ 7 |
-| this month, last month | 1st 00:00 → 1st of next month | one per day (28–31) | **peak week** 1–5 | per week = total ÷ (days ÷ 7) |
-| this year, last year | Jan 1 → next Jan 1 | 12 months | **peak month** 1–12 | per month = total ÷ 12 |
-
-Three departures from the literal text, each because the literal text cannot be implemented:
-
-- Peak week is 1–5, not 1–4. Week-of-month is `ceil(dayOfMonth ÷ 7)`; days 29–31 fall in week 5.
-- Year filters get peak month and average per month, by extension of the same pattern.
-- "This week" averages over 7 days even on a Tuesday. Averaging over elapsed days is a different feature; say so in the UI label ("per day") and move on.
-
-When the total is zero, peak shows "—".
-
-The four cards and the pie count documents by **`created_at` within the range**, including the status cards. A "completed this week" that means *completed* this week would need a `completed_at` column that does not exist. Consistency wins.
-
-### 3.9 The browser owns the calendar; the server owns the counting
-
-"Same timezone as the user's browser" means the range boundaries ("start of this week") and the bucket labels ("06:00") must both use the browser's zone. The clean split, and the one the contract in section 2 encodes:
-
-- The **browser** computes `from`/`to` as instants using plain `new Date(y, m, d)` arithmetic, which is local by definition, and sends its zone name from `Intl.DateTimeFormat().resolvedOptions().timeZone`.
-- The **server** runs one parameterized query: filter rows by instant, group by `date_trunc(granularity, created_at AT TIME ZONE tz)`.
-
-*Verified:* with rows at 23:30Z and 01:15Z and a Jakarta (UTC+7) "today", the query returns buckets `06:00` and `08:00` and excludes a row at 17:30Z (00:30 the next day in Jakarta).
-
-**One trap, also verified:** the `postgres` client in this repo is configured with `prepare: false`, and in that mode it **refuses `Date` values as query parameters** — it throws `The "string" argument must be of type string`. Always pass `date.toISOString()`. This applies to `db.execute(sql\`…\`)` too.
-
-### 3.10 Folder structure: new code follows it fully; existing routes are moved, not rewritten
-
-The spec mandates `controller/`, `middleware/`, `validator/`, `dto/`, `interface/`, `utils/` alongside the existing `routes/`, `services/`, `models/`, `migration/`. What goes where:
-
-| Folder | Contains | Imports Elysia? |
+| Old | New | Kind (see 3.2) |
 | --- | --- | --- |
-| `routes/` | the `new Elysia().post(path, controller, { body: schema })` wiring, nothing else | yes |
-| `controller/` | the handler bodies: call a service, shape the response, set the status | no |
-| `validator/` | `t.Object(...)` request schemas | yes (`t` only) |
-| `dto/` | request and response body types as TypeScript interfaces | no |
-| `interface/` | service input/output types, shared HTTP types | no |
-| `middleware/` | Elysia plugins that run before handlers | yes |
-| `utils/` | pure functions with no I/O | no |
-| `services/`, `models/`, `migration/` | as before | no |
+| `/#/` | `/` | root |
+| `/#/login` | `/login` | guest |
+| `/#/signup` | `/signup` | guest |
+| `/#/verify?email=…` | `/verify?email=…` | open |
+| `/#/app`, `/#/app/dashboard` | `/dashboard` | auth |
+| `/#/app/documents` | `/documents` | auth |
+| `/#/app/templates` | `/templates` | auth |
+| `/#/app/signings` | `/signings` | auth |
+| `/#/app/analytics` | `/analytics` | auth |
+| `/#/app/team` | `/team` | auth |
+| `/#/app/settings` | `/settings` | auth |
+| `/#/app/billing` | `/billing` | auth |
+| `/#/app/audit` | `/audit` | auth |
+| `/#/app/integrations` | `/integrations` | auth |
+| `/#/app/help` | `/help` | auth |
+| `/#/app/profile` | `/profile` | auth |
+| anything else | redirect to `/` | — |
 
-Step A1 moves the existing `users` and `email-verification` handlers into controllers and validators. It is cut-and-paste: the handler function body moves, the schema object moves, behavior does not change. After this ticket, the whole backend has one shape.
+In-page anchors on the landing page (`#hero`, `#features`, `#testimonials`, `#pricing`) are **not routes** and do not change. They keep working because the router ignores any `href` that starts with `#`.
 
-### 3.11 The pie chart
+### 2.2 The `src/ui/` wrappers (Phase B)
 
-Part-to-whole with three close values is a form pie charts handle badly — the eye cannot compare two slices of 32% and 36%. The spec asks for a pie, so it is a pie, but it ships with **percentage labels in a legend beside it**, which is what makes it readable. The three slice colors were run through a colorblind-safety validator against this app's light and dark surfaces and pass; the aqua slice sits below 3:1 contrast on the light surface, which is exactly why the legend labels are mandatory rather than decorative.
+| File | Wraps (Melt builder) | Used by |
+| --- | --- | --- |
+| `ui/Tabs.svelte` | `Tabs` | Signup account type, Testimonials dots, Dashboard time range |
+| `ui/PinField.svelte` | `PinInput` | Verify code |
+| `ui/Menu.svelte` | `Popover` | Navbar user menu |
+| `ui/Drawer.svelte` | `Dialog` | Landing mobile nav, app shell mobile sidebar |
+| `ui/ToggleButton.svelte` | `Toggle` | PasswordField eye button, both ThemeToggles |
+| `ui/Tooltip.svelte` | `Tooltip` | Dashboard chart bars |
 
----
+`auth/Field.svelte` stays as it is. Melt has no text-input builder; a plain `<input class="input">` is already correct.
 
-## 4. Files
+### 2.3 Backend
 
-### Backend — create
-
-| Path | Purpose |
-| --- | --- |
-| `interface/http.interface.ts` | `HttpSet`, the one type every controller needs |
-| `middleware/auth.middleware.ts` | bearer token → `user` in context, or 401 |
-| `dto/users.dto.ts`, `dto/sessions.dto.ts`, `dto/email-verification.dto.ts`, `dto/dashboard.dto.ts` | request/response types |
-| `validator/users.validator.ts`, `validator/sessions.validator.ts`, `validator/email-verification.validator.ts`, `validator/dashboard.validator.ts` | `t.Object` schemas |
-| `controller/users.controller.ts`, `controller/sessions.controller.ts`, `controller/email-verification.controller.ts`, `controller/dashboard.controller.ts` | handlers |
-| `routes/sessions.routes.ts`, `routes/dashboard.routes.ts` | wiring |
-| `services/dashboard.service.ts` | the two analytics queries |
-| `models/documents.model.ts` | moved out of `db/schema.ts`, new statuses, `timestamptz` |
-| `migration/1789400000-documents-and-wallet.migration.ts` | `documents` table, `users.balance` |
-| `utils/wallet.util.ts` | `WALLET_CURRENCY` |
-| `scripts/seed-documents.ts` (outside `src/`) | dev data for the dashboard |
-
-### Backend — change
-
-| Path | Change |
-| --- | --- |
-| `routes/users.routes.ts`, `routes/email-verification.routes.ts` | handlers and schemas move out; `/me` added |
-| `services/sessions.service.ts` | `revokeSession`, `refreshAccessToken` |
-| `services/users.service.ts` | `getProfile` |
-| `db/schema.ts` | export documents from its model; delete the inline definition |
-| `index.ts` | delete the two demo `/documents` endpoints; mount the new routes |
-| `package.json` | `db:seed` script |
-
-### Frontend — create
-
-| Path | Purpose |
-| --- | --- |
-| `src/app/AppLayout.svelte` | navbar + sidebar + content slot |
-| `src/app/Navbar.svelte`, `src/app/UserMenu.svelte`, `src/app/Wallet.svelte`, `src/app/Sidebar.svelte` | the shell |
-| `src/app/Placeholder.svelte` | the twelve unspecified pages |
-| `src/dashboard/Dashboard.svelte` | the page |
-| `src/dashboard/Clock.svelte`, `StatCard.svelte`, `LineChart.svelte`, `PieChart.svelte`, `RecentDocuments.svelte` | its parts |
-| `src/dashboard/range.ts` | the table in 3.8 as code |
-| `src/lib/routes.ts` | route table and kinds |
-
-### Frontend — change
-
-| Path | Change |
-| --- | --- |
-| `src/App.svelte` | route guard, layout switch |
-| `src/lib/api.ts` | `authFetch`, `logout`, `me`, dashboard calls |
-| `src/lib/auth.svelte.ts` | `profile` state, `refreshToken` getter |
-| `src/auth/Login.svelte`, `src/auth/Verify.svelte` | redirect to `#/dashboard` |
-| `src/landing/Nav.svelte`, `Hero.svelte`, `FinalCta.svelte` | `#/app` links → `#/signup` / `#/login` |
-| `src/app.css` | three chart color tokens |
-| `src/Dashboard.svelte` | **deleted** (the 769-line demo) |
+Nothing changes in `apps/backend`. Every API call keeps its path and shape.
 
 ---
 
-## 5. Phase A — backend
+## 3. Things that need settling
 
-### A1 — Adopt the folder structure (mechanical)
+### 3.1 Which Melt package
 
-Create `interface/http.interface.ts`:
+There are two packages with "Melt UI" in the name:
 
-```ts
-export interface HttpSet {
-  status?: number | string;
-}
+- `@melt-ui/svelte` (0.86) — the original, built on Svelte 4 stores. Works on Svelte 5 but every example uses `$store` syntax that does not mix with runes.
+- `melt` (0.44) — the Svelte 5 rewrite. Builders are classes (`new Tabs(...)`) and you spread their getters onto elements (`{...tabs.trigger}`). Peer dependencies: `svelte ^5.30.1` (we have 5.57) and `@floating-ui/dom`.
+
+**Use `melt`.** Install from the frontend folder so the workspace lockfile is updated:
+
+```
+cd apps/frontend
+bun add melt@0.44.0 @floating-ui/dom
 ```
 
-Then for each existing route file, move the handler bodies and schemas. One full example, `register`; do the same for `login`, `verify-email`, `resend-otp`.
+Restart the Vite dev server afterwards; Vite pre-bundles dependencies at startup.
 
-`dto/users.dto.ts`:
+If Bun refuses because of the `svelte` peer range, change `"svelte": "^5.2.0"` to `"svelte": "^5.57.0"` in `apps/frontend/package.json` and run `bun install` from the repository root.
 
-```ts
-export interface RegisterDto {
-  organization_name?: string;
-  full_name: string;
-  phone_number?: string;
-  email: string;
-  password: string;
-}
+Melt's docs are at melt-ui.com, "Next" version. Only the builder form is used here, never the `melt/components` form, so there is one pattern to learn.
 
-export interface LoginDto {
-  email: string;
-  password: string;
-}
-```
+### 3.2 Routing library or hand-rolled
 
-`validator/users.validator.ts` — the `t.Object` moves here verbatim:
+The app already has a 40-line hand-rolled hash router in `App.svelte`. Swapping it for a library adds a dependency whose Svelte 5 support would need checking, and the routing needs are tiny (fourteen flat routes, one query parameter). **Keep it hand-rolled**, but move it into `lib/router.svelte.ts` so pages can call `router.navigate()` instead of poking `window.location`. The full file is in 4.1 and was run in a browser.
 
-```ts
-import { t } from 'elysia';
+The route kinds and guard rules do not change from the previous ticket:
 
-export const registerBody = t.Object({
-  organization_name: t.Optional(t.String({ minLength: 1, maxLength: 255 })),
-  full_name: t.String({ minLength: 1, maxLength: 255 }),
-  phone_number: t.Optional(t.String({ maxLength: 32 })),
-  email: t.String({ format: 'email' }),
-  password: t.String({ minLength: 6 }),
-});
+| Kind | Guest | Logged in |
+| --- | --- | --- |
+| root `/` | landing page | replace URL with `/dashboard` |
+| guest `/login`, `/signup` | allowed | replace URL with `/dashboard` |
+| open `/verify` | allowed | allowed |
+| auth (the twelve app pages) | replace URL with `/login` | app shell + page |
+| unknown | replace URL with `/` | replace URL with `/` |
 
-export const loginBody = t.Object({
-  email: t.String({ format: 'email' }),
-  password: t.String({ minLength: 1 }),
-});
-```
+"Replace" means `history.replaceState`, so the Back button never lands on a URL that immediately redirects again.
 
-`controller/users.controller.ts` — the handler body moves here verbatim. Note there is no Elysia import:
+### 3.3 Dropping the `/app` prefix
 
-```ts
-import type { HttpSet } from '../interface/http.interface';
-import type { RegisterDto, LoginDto } from '../dto/users.dto';
-import { registerUser, loginUser } from '../services/users.service';
+The user asked for `/dashboard`, not `/app/dashboard`. So the twelve app pages live at the top level. This means `App.svelte` must know the list of auth routes explicitly (a `Set` of twelve strings) rather than matching a prefix. That list already exists as `pageMap` in `App.svelte`; reuse it.
 
-export async function registerController({ body, set }: { body: RegisterDto; set: HttpSet }) {
-  try {
-    const result = await registerUser({ /* unchanged */ });
-    return { /* unchanged */ };
-  } catch (error: any) {
-    /* unchanged */
-  }
-}
+### 3.4 Login currently bounces back to the login page
 
-export async function loginController({ body, set }: { body: LoginDto; set: HttpSet }) {
-  /* unchanged */
-}
-```
+`auth.save()` in `lib/auth.svelte.ts` sets `profile = null` when it is handed the bare `{ id, email }` object that `/api/login` returns (the profile with the wallet only comes from `/api/me`). `Login.svelte` then navigates to the dashboard, the guard in `App.svelte` sees `auth.profile === null`, and redirects to the login page. The tokens are in `localStorage`, so a page refresh fixes it, which is why it may look like it works.
 
-`routes/users.routes.ts` shrinks to wiring:
+The fix belongs in Phase A because the guard is being rewritten anyway: add `auth.loadProfile()` (4.2), call it after `auth.save()` in `Login.svelte` and `Verify.svelte`, and only then navigate. `Signup.svelte` does not need it: it goes to `/verify`, which is an open route.
 
-```ts
-import { Elysia } from 'elysia';
-import { registerController, loginController } from '../controller/users.controller';
-import { registerBody, loginBody } from '../validator/users.validator';
+### 3.5 Colors in the app shell
 
-export const usersRoutes = new Elysia({ prefix: '' })
-  .post('/register', registerController, {
-    body: registerBody,
-    detail: { tags: ['Authentication & Users'], summary: 'Register a new user', description: '…unchanged…' },
-  })
-  .post('/login', loginController, {
-    body: loginBody,
-    detail: { /* unchanged */ },
-  });
-```
+The landing and auth pages use the tokens in `app.css` (`bg-bg-base`, `text-fg`, `bg-accent`, …). The app shell and dashboard built in the previous ticket use raw Tailwind palette classes instead (`bg-slate-50`, `dark:bg-slate-950`, `bg-blue-500`, `text-slate-600`). That is two color systems in one app.
 
-*Verified:* a controller typed `{ body: Dto; set: HttpSet }` type-checks as an Elysia 1.4 handler and runs. The `detail` blocks stay in the route file; they are documentation, not logic.
+"Keep the color combination as it is" is read as: keep the **design system**, do not invent new colors. So, while touching the app shell in Phase C, replace the slate/blue classes with tokens using this mapping. Do not hunt for these in files you are not already editing.
 
-After moving all four handlers: `bunx tsc --noEmit` silent, and the tests from issues 14 and 16 still pass (register, login, verify, resend). Nothing else may change in this step.
+| Raw class in app shell | Token |
+| --- | --- |
+| `bg-slate-50 dark:bg-slate-950` (page) | `bg-bg-base` |
+| `bg-white dark:bg-slate-900`, `bg-white dark:bg-slate-800` (cards, nav) | `bg-bg-elevated` |
+| `border-slate-200 dark:border-slate-800/700` | `border-gray-1 dark:border-gray-2` |
+| `text-slate-900 dark:text-white` | `text-fg` |
+| `text-slate-600/500 dark:text-slate-400` | `text-fg-muted` |
+| `bg-blue-500 text-white` (active filter) | `bg-accent text-white` |
+| `bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100` (active sidebar link) | `bg-accent/10 text-accent` |
+| `hover:bg-slate-100 dark:hover:bg-slate-800` | `hover:bg-gray-1 dark:hover:bg-gray-2` |
+| chart gradient `from-blue-500 to-blue-400` | `bg-accent` |
 
-### A2 — Documents model and migration
+The pie chart's three status colors (`#fbbf24`, `#3b82f6`, `#10b981`) and the status badge classes in `RecentDocuments.svelte` stay: they encode meaning (draft / sent / completed), not brand.
 
-Create `models/documents.model.ts`:
+If the reviewer disagrees with this reading, the mapping is a find-and-replace to revert.
+
+### 3.6 `bun run check` baseline
+
+Running `bun run check` in `apps/frontend` today gives **2 errors, 16 warnings**. The errors are both in `app/dashboard/PieChart.svelte` (`paths` has an implicit `any[]` type: declare it as `const paths: { path: string; color: string }[] = []`). Nine of the warnings are `state_referenced_locally` in `Wallet.svelte`, `StatCard.svelte`, `LineChart.svelte`, and `PieChart.svelte`: those components compute values from props once, at creation, so when the dashboard filter changes and new data arrives, the charts and cards **do not update**. Phase C touches those files; fix them with `$derived` while you are there (6.6 shows how). Two warnings are `<svelte:component>` in `App.svelte`, which Phase A deletes. Two are in `src/Dashboard.svelte`, a leftover demo page nothing imports; Phase A deletes it.
+
+### 3.7 Melt elements use the browser's popover and dialog
+
+Melt's `Popover`, `Tooltip`, and `Dialog` render with the native `popover` attribute and `<dialog>` element. Two consequences:
+
+1. They render in the browser's *top layer*. `z-index` on them does nothing and is not needed; `overflow: hidden` on an ancestor cannot clip them. Good.
+2. The browser gives them default styles: a black border, white background, `margin: auto`, centred on screen. Tailwind's preflight does not reset these. Without the CSS in 5.1 the user menu appears as a white box with a black border in the middle of the screen. Add that CSS in Phase B before styling anything else.
+
+### 3.8 Production serving
+
+Vite's dev server and `vite preview` already serve `index.html` for any unknown path (that is what `appType: 'spa'`, the default, means), so `/dashboard` loads in development with no config change. Whatever eventually serves `apps/frontend/dist` in production must do the same (nginx: `try_files $uri /index.html;`). The backend does not serve the frontend today, so there is nothing to change in this ticket; this is a note for whoever sets up deployment.
+
+---
+
+## 4. Phase A — real URLs
+
+### 4.1 `lib/router.svelte.ts` *(verified)*
+
+Create `apps/frontend/src/lib/router.svelte.ts`. The `.svelte.ts` suffix is required because the file uses `$state`.
 
 ```ts
-import { pgTable, text, timestamp, uuid, jsonb, integer } from 'drizzle-orm/pg-core';
-import { users } from './users.model';
-
-export const DOCUMENT_STATUSES = ['draft', 'sent', 'completed'] as const;
-export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
-
-export const documents = pgTable('documents', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  title: text('title').notNull(),
-  fileUrl: text('file_url'),
-  status: text('status', { enum: DOCUMENT_STATUSES }).default('draft').notNull(),
-  metadata: jsonb('metadata'),
-  creatorId: integer('creator_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export type Document = typeof documents.$inferSelect;
-```
-
-In `db/schema.ts`, delete the inline `documents` block, add `export * from '../models/documents.model';`, and change the `signatures` reference to import `documents` from the model. `creatorId` becomes `NOT NULL`: a document without an owner cannot appear on anyone's dashboard.
-
-Add `balance` to `models/users.model.ts`:
-
-```ts
-import { numeric } from 'drizzle-orm/pg-core';
-// …
-balance: numeric('balance', { precision: 14, scale: 2 }).notNull().default('0'),
-```
-
-Drizzle returns `numeric` as a **string** (`"0.00"`), not a number. That is correct — floating point must not touch money — and it is why the `/me` contract shows `"balance": "0.00"`.
-
-Create `migration/1789400000-documents-and-wallet.migration.ts`:
-
-```ts
-import { client } from '../db';
-
-export async function up() {
-  console.log('Running migration: 1789400000-documents-and-wallet.migration.ts');
-
-  await client`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS balance NUMERIC(14,2) NOT NULL DEFAULT 0;
-  `;
-
-  await client`
-    CREATE TABLE IF NOT EXISTS documents (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      title TEXT NOT NULL,
-      file_url TEXT,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'completed')),
-      metadata JSONB,
-      creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `;
-  await client`
-    CREATE INDEX IF NOT EXISTS documents_creator_id_created_at_idx
-    ON documents (creator_id, created_at);
-  `;
-
-  await client`DROP TRIGGER IF EXISTS documents_set_updated_at ON documents;`;
-  await client`
-    CREATE TRIGGER documents_set_updated_at
-    BEFORE UPDATE ON documents
-    FOR EACH ROW
-    EXECUTE FUNCTION set_updated_at();
-  `;
-
-  console.log('Migration completed: documents table, users.balance.');
-}
-```
-
-The trigger function `set_updated_at()` already exists from the sessions migration. The index is on `(creator_id, created_at)` because every dashboard query filters by both.
-
-Run it from `apps/backend`:
-
-```bash
-bun --env-file=../../.env -e "import('./src/migration/1789400000-documents-and-wallet.migration.ts').then(m => m.up()).then(() => process.exit(0))"
-docker compose exec postgres psql -U postgres -d digital_sign_db -c '\d documents'
-```
-
-### A3 — Auth middleware
-
-Create `middleware/auth.middleware.ts`:
-
-```ts
-import { Elysia } from 'elysia';
-import { jwtVerify } from 'jose';
-import { eq } from 'drizzle-orm';
-import { db } from '../db';
-import { users, type User } from '../models/users.model';
-
-const jwtSecret = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? 'dev-only-insecure-secret-change-me'
-);
-
-async function userFromBearer(authorization: string | undefined): Promise<User | null> {
-  if (!authorization?.startsWith('Bearer ')) return null;
-  try {
-    const { payload } = await jwtVerify(authorization.slice(7), jwtSecret);
-    const [user] = await db.select().from(users).where(eq(users.id, Number(payload.sub))).limit(1);
-    return user ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Attach as `.use(authMiddleware)` inside a route plugin. Every handler after it
- * receives `user`; requests without a valid token stop here with 401.
+ * History-API router. The URL is the only source of truth: `path` and
+ * `search` mirror `window.location` and change on navigate() or Back/Forward.
  */
-export const authMiddleware = new Elysia({ name: 'auth-middleware' })
-  .derive({ as: 'scoped' }, async ({ headers }) => ({
-    user: await userFromBearer(headers.authorization),
-  }))
-  .onBeforeHandle({ as: 'scoped' }, ({ user, set }) => {
-    if (!user) {
-      set.status = 401;
-      return { error: 'Unauthorized' };
+class Router {
+  path = $state(window.location.pathname);
+  search = $state(window.location.search);
+
+  /** Query string as URLSearchParams. `router.query.get('email')` */
+  get query() {
+    return new URLSearchParams(this.search);
+  }
+
+  /** Go to an app URL such as '/dashboard' or '/verify?email=a%40b.c'. */
+  navigate(to: string, { replace = false } = {}) {
+    if (to === this.path + this.search) return;
+    history[replace ? 'replaceState' : 'pushState'](null, '', to);
+    this.sync();
+  }
+
+  /** Call once, from App.svelte's onMount. */
+  init() {
+    window.addEventListener('popstate', () => this.sync());
+
+    document.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const anchor = (event.target as Element).closest('a');
+      if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
+      if (anchor.origin !== window.location.origin) return;
+
+      // '#features' style links scroll within the page; the browser handles them.
+      if (anchor.getAttribute('href')?.startsWith('#')) return;
+
+      event.preventDefault();
+      this.navigate(anchor.pathname + anchor.search + anchor.hash);
+    });
+  }
+
+  private sync() {
+    this.path = window.location.pathname;
+    this.search = window.location.search;
+  }
+}
+
+export const router = new Router();
+```
+
+What was verified: clicking `<a href="/verify?email=a%40b.c">` updates `router.path` to `/verify` and `router.query.get('email')` returns `a@b.c`; `navigate('/dashboard', { replace: true })` then Back returns to `/`; clicking `<a href="#features">` leaves `router.path` alone and sets `location.hash`.
+
+The click listener means plain `<a href="/login">` works everywhere. Pages only call `router.navigate()` after an async action (login succeeded, code verified).
+
+### 4.2 `auth.loadProfile()` in `lib/auth.svelte.ts`
+
+Add this method to `AuthStore` and import `me` from `./api`:
+
+```ts
+  /** Fetch /api/me with the stored access token. Clears auth on 401. */
+  async loadProfile(): Promise<boolean> {
+    const token = this.accessToken;
+    if (!token) return false;
+    try {
+      const profile = await me(token);
+      this.profile = profile;
+      try { localStorage.setItem(PROFILE, JSON.stringify(profile)); } catch {}
+      return true;
+    } catch {
+      this.clear();
+      return false;
     }
-  });
-```
-
-*Verified* in this shape: a route plugin that does `.use(authMiddleware)` answers 401 with no token and with a tampered token, 200 with a real one, and a sibling plugin without the middleware stays public. `{ as: 'scoped' }` is what makes the hooks apply to the plugin that `.use`s this one; without it they apply to nothing.
-
-The secret line duplicates `sessions.service.ts`. Move that constant into `utils/jwt.util.ts` and import it from both places, so there is one definition.
-
-Controllers on protected routes receive `user` alongside `body`/`query`/`set`; type it as `{ user: User; … }`. It is never null inside a handler, because the hook already returned.
-
-### A4 — `/me`
-
-`services/users.service.ts`, add:
-
-```ts
-import { organizations } from '../models/organizations.model';
-import { WALLET_CURRENCY } from '../utils/wallet.util';
-
-export async function getProfile(user: User) {
-  const organization = user.organizationId
-    ? (await db.select().from(organizations).where(eq(organizations.id, user.organizationId)).limit(1))[0] ?? null
-    : null;
-
-  // Members and admins spend from the organization owner's wallet.
-  let balance = user.balance;
-  if (user.type !== 'PERSONAL' && user.type !== 'OWNER' && organization) {
-    const [owner] = await db.select({ balance: users.balance }).from(users).where(eq(users.id, organization.ownerId)).limit(1);
-    if (owner) balance = owner.balance;
   }
-
-  return {
-    user: {
-      id: user.id, name: user.name, email: user.email, type: user.type,
-      organization: organization ? { id: organization.id, name: organization.name, slug: organization.slug } : null,
-    },
-    wallet: { balance, currency: WALLET_CURRENCY },
-  };
-}
 ```
 
-`utils/wallet.util.ts` is one line: `export const WALLET_CURRENCY = 'USD';`
-
-Controller `meController({ user })` returns `{ success: true, data: await getProfile(user) }`. Route: a **separate** plugin so the middleware does not leak onto register/login:
+Then simplify `save()`: it only stores tokens now, and `profile` is always set by `loadProfile()`.
 
 ```ts
-export const meRoutes = new Elysia({ prefix: '' })
-  .use(authMiddleware)
-  .get('/me', meController, { detail: { tags: ['Authentication & Users'], summary: 'Current user profile and wallet' } });
-```
-
-Export it from `users.routes.ts` next to `usersRoutes`, mount both in `index.ts`.
-
-### A5 — Logout and refresh
-
-`services/sessions.service.ts`, add:
-
-```ts
-import { and, eq, gt } from 'drizzle-orm';
-
-/** Returns false when no session matched. */
-export async function revokeSession(refreshToken: string): Promise<boolean> {
-  const deleted = await db.delete(sessions).where(eq(sessions.refreshToken, refreshToken)).returning({ id: sessions.id });
-  return deleted.length > 0;
-}
-
-/** Returns null when the refresh token is unknown or expired. */
-export async function refreshAccessToken(refreshToken: string): Promise<string | null> {
-  const [session] = await db
-    .select()
-    .from(sessions)
-    .where(and(eq(sessions.refreshToken, refreshToken), gt(sessions.expiresAt, new Date())))
-    .limit(1);
-  if (!session) return null;
-
-  const accessToken = await signAccessToken(session.userId);
-  await db.update(sessions).set({ accessToken }).where(eq(sessions.id, session.id));
-  return accessToken;
-}
-```
-
-`gt(sessions.expiresAt, new Date())` is fine here — Drizzle's query builder serializes the `Date` itself. The trap in 3.9 is only for raw `sql` templates and `client`.
-
-`controller/sessions.controller.ts`:
-
-```ts
-export async function logoutController({ body, set }: { body: LogoutDto; set: HttpSet }) {
-  const revoked = await revokeSession(body.refresh_token);
-  if (!revoked) {
-    set.status = 401;
-    return { error: 'Invalid token' };
+  save(accessToken: string, refreshToken: string) {
+    try {
+      localStorage.setItem(ACCESS, accessToken);
+      localStorage.setItem(REFRESH, refreshToken);
+    } catch {}
   }
-  return { success: true, message: 'User logged out successfully' };
-}
-
-export async function refreshController({ body, set }: { body: RefreshDto; set: HttpSet }) {
-  const accessToken = await refreshAccessToken(body.refresh_token);
-  if (!accessToken) {
-    set.status = 401;
-    return { error: 'Invalid token' };
-  }
-  return { success: true, data: { access_token: accessToken } };
-}
 ```
 
-Both DTOs are `{ refresh_token: string }`; both validators are `t.Object({ refresh_token: t.String({ minLength: 1 }) })`. Wrap each in the same try/catch → 500 pattern the other controllers use. `routes/sessions.routes.ts` wires `/logout` and `/refresh` with no middleware. Mount in `index.ts`.
+Update the three callers (`Login.svelte`, `Signup.svelte`, `Verify.svelte` does not call it) to `auth.save(result.access_token, result.refresh_token)`.
 
-### A6 — Dashboard service, controller, routes
+### 4.3 Rewrite `App.svelte`
 
-`services/dashboard.service.ts`:
-
-```ts
-import { sql, desc, eq } from 'drizzle-orm';
-import { db } from '../db';
-import { documents } from '../models/documents.model';
-
-export type Granularity = 'hour' | 'day' | 'month';
-
-export interface AnalyticsInput {
-  userId: number;
-  from: Date;
-  to: Date;
-  tz: string;
-  granularity: Granularity;
-}
-
-export async function getAnalytics(input: AnalyticsInput) {
-  // ISO strings, never Date objects: the postgres client rejects Date parameters. See ticket 3.9.
-  const from = input.from.toISOString();
-  const to = input.to.toISOString();
-
-  const [totals] = await db.execute(sql`
-    SELECT count(*)::int AS uploaded,
-           count(*) FILTER (WHERE status = 'draft')::int AS draft,
-           count(*) FILTER (WHERE status = 'sent')::int AS sent,
-           count(*) FILTER (WHERE status = 'completed')::int AS completed
-    FROM documents
-    WHERE creator_id = ${input.userId} AND created_at >= ${from} AND created_at < ${to}
-  `);
-
-  const series = await db.execute(sql`
-    SELECT to_char(date_trunc(${input.granularity}, created_at AT TIME ZONE ${input.tz}), 'YYYY-MM-DD"T"HH24:MI:SS') AS bucket,
-           count(*)::int AS count
-    FROM documents
-    WHERE creator_id = ${input.userId} AND created_at >= ${from} AND created_at < ${to}
-    GROUP BY 1
-    ORDER BY 1
-  `);
-
-  return { totals, series };
-}
-
-export async function getRecentDocuments(userId: number) {
-  return db
-    .select({ id: documents.id, title: documents.title, status: documents.status, createdAt: documents.createdAt })
-    .from(documents)
-    .where(eq(documents.creatorId, userId))
-    .orderBy(desc(documents.createdAt))
-    .limit(5);
-}
-```
-
-Both SQL statements are *verified* against a `timestamptz` column with the Jakarta example from 3.9. Everything in `${…}` is a bound parameter — `granularity` and `tz` included — so no user input is spliced into SQL. `date_trunc` accepts its unit as a text parameter.
-
-`validator/dashboard.validator.ts`:
-
-```ts
-export const analyticsQuery = t.Object({
-  from: t.String({ format: 'date-time' }),
-  to: t.String({ format: 'date-time' }),
-  tz: t.String({ minLength: 1, maxLength: 64 }),
-  granularity: t.Union([t.Literal('hour'), t.Literal('day'), t.Literal('month')]),
-});
-```
-
-`controller/dashboard.controller.ts`, `analyticsController({ user, query, set })`:
-
-1. `new Intl.DateTimeFormat('en', { timeZone: query.tz })` — throws `RangeError` for an unknown zone. Catch it → `400 { error: 'Invalid timezone' }`. This is what keeps a bad `tz` from becoming a database error.
-2. `from = new Date(query.from)`, `to = new Date(query.to)`; if `to <= from` → `400 { error: 'Invalid range' }`.
-3. Return `{ success: true, data: await getAnalytics({ userId: user.id, from, to, tz: query.tz, granularity: query.granularity }) }`.
-
-`recentController({ user })` returns `{ success: true, data: await getRecentDocuments(user.id) }`.
-
-`routes/dashboard.routes.ts`:
-
-```ts
-export const dashboardRoutes = new Elysia({ prefix: '/dashboard' })
-  .use(authMiddleware)
-  .get('/analytics', analyticsController, { query: analyticsQuery, detail: { tags: ['Dashboard'], summary: 'Totals and time series for a range' } })
-  .get('/recent', recentController, { detail: { tags: ['Dashboard'], summary: 'Five most recent documents' } });
-```
-
-In `index.ts`: delete the `/documents` GET and POST handlers and the `documents, signatures` import; mount `meRoutes`, `sessionsRoutes`, `dashboardRoutes` inside the `/api` group.
-
-### A7 — Seed script
-
-The dashboard is empty without documents, and nothing in the app creates them yet. Create `apps/backend/scripts/seed-documents.ts` (outside `src/`, so the `src` naming rules do not apply):
-
-```ts
-import { eq } from 'drizzle-orm';
-import { db } from '../src/db';
-import { users } from '../src/models/users.model';
-import { documents, DOCUMENT_STATUSES } from '../src/models/documents.model';
-
-const email = process.argv[2];
-if (!email) {
-  console.error('Usage: bun run db:seed <email>');
-  process.exit(1);
-}
-
-const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-if (!user) {
-  console.error(`No user with email ${email}`);
-  process.exit(1);
-}
-
-const rows = [];
-const now = Date.now();
-for (let i = 0; i < 80; i++) {
-  // Spread over the last 400 days, weighted toward recent, at a random hour.
-  const daysAgo = Math.floor(Math.pow(Math.random(), 2) * 400);
-  const createdAt = new Date(now - daysAgo * 86_400_000 - Math.floor(Math.random() * 86_400_000));
-  rows.push({
-    title: `Document ${i + 1}`,
-    status: DOCUMENT_STATUSES[Math.floor(Math.random() * DOCUMENT_STATUSES.length)],
-    creatorId: user.id,
-    createdAt,
-    updatedAt: createdAt,
-  });
-}
-await db.insert(documents).values(rows);
-console.log(`Inserted ${rows.length} documents for ${email}`);
-process.exit(0);
-```
-
-Add to `apps/backend/package.json`: `"db:seed": "bun --env-file=../../.env scripts/seed-documents.ts"`, and to the root `package.json`: `"db:seed": "bun --filter backend db:seed"`. Run `bun run db:seed you@example.com` after creating your account.
-
-### Phase A check
-
-```bash
-cd apps/backend && bunx tsc --noEmit         # silent
-```
-
-```bash
-# login, keep the tokens
-curl -s -X POST localhost:3000/api/login -H 'content-type: application/json' -d '{"email":"…","password":"…"}'
-# protected without token -> 401
-curl -s localhost:3000/api/me
-# with token -> profile + wallet
-curl -s localhost:3000/api/me -H "authorization: Bearer $ACCESS"
-# analytics for "today" in your zone (adjust the instants)
-curl -s "localhost:3000/api/dashboard/analytics?from=2026-09-13T17:00:00.000Z&to=2026-09-14T17:00:00.000Z&tz=Asia/Jakarta&granularity=hour" -H "authorization: Bearer $ACCESS"
-# bad tz -> 400
-curl -s "localhost:3000/api/dashboard/analytics?from=…&to=…&tz=Mars/Olympus&granularity=hour" -H "authorization: Bearer $ACCESS"
-# refresh -> new access token; logout -> 200; logout again -> 401 Invalid token
-curl -s -X POST localhost:3000/api/refresh -H 'content-type: application/json' -d "{\"refresh_token\":\"$REFRESH\"}"
-curl -s -X POST localhost:3000/api/logout  -H 'content-type: application/json' -d "{\"refresh_token\":\"$REFRESH\"}"
-curl -s -X POST localhost:3000/api/logout  -H 'content-type: application/json' -d "{\"refresh_token\":\"$REFRESH\"}"
-```
-
----
-
-## 6. Phase B — app shell
-
-### B1 — API client
-
-In `src/lib/api.ts`:
-
-```ts
-export interface Profile {
-  user: { id: number; name: string; email: string; type: 'OWNER' | 'PERSONAL' | 'MEMBER' | 'ADMIN';
-          organization: { id: number; name: string; slug: string } | null };
-  wallet: { balance: string; currency: string };
-}
-
-async function refreshAccessToken(): Promise<boolean> {
-  const refresh = auth.refreshToken;
-  if (!refresh) return false;
-  const response = await fetch('/api/refresh', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refresh }),
-  });
-  if (!response.ok) return false;
-  const payload = await response.json();
-  auth.setAccessToken(payload.data.access_token);
-  return true;
-}
-
-/** Fetch with the bearer token; on 401, refresh once and retry; if that fails, sign out. */
-export async function authFetch<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { ...(init.headers ?? {}), Authorization: `Bearer ${auth.accessToken ?? ''}` },
-  });
-
-  if (response.status === 401 && !retried && (await refreshAccessToken())) {
-    return authFetch<T>(path, init, true);
-  }
-  if (response.status === 401) {
-    auth.clear();
-    window.location.hash = '#/login';
-    throw new ApiError('Your session has expired. Please sign in again.');
-  }
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new ApiError(payload?.error ?? 'Something went wrong. Please try again.');
-  return payload?.data ?? payload;
-}
-
-export const me = () => authFetch<Profile>('/api/me');
-export const logout = (refreshToken: string) => post<unknown>('/api/logout', { refresh_token: refreshToken });
-```
-
-`auth.svelte.ts` gains `accessToken` / `refreshToken` getters that read localStorage, `setAccessToken(token)`, and a `profile = $state<Profile | null>(null)` that the shell fills from `/me`.
-
-### B2 — Route table and guard
-
-`src/lib/routes.ts`:
-
-```ts
-export type RouteKind = 'root' | 'guest' | 'open' | 'auth';
-
-const GUEST = new Set(['#/login', '#/signup']);
-const OPEN = new Set(['#/verify']);
-
-export function routeKind(path: string): RouteKind {
-  if (path === '' || path === '#' || path === '#/' || !path.startsWith('#/')) return 'root';
-  if (GUEST.has(path)) return 'guest';
-  if (OPEN.has(path)) return 'open';
-  return 'auth';
-}
-```
-
-In-page anchors (`#features`, `#pricing`) do not start with `#/`, so they are `root` and keep rendering the landing page — the anchors still scroll.
-
-`App.svelte` becomes:
+Replace the whole file. The page imports stay as they are today.
 
 ```svelte
 <script lang="ts">
   import { onMount } from 'svelte';
   import { theme } from './lib/theme.svelte';
   import { auth } from './lib/auth.svelte';
-  import { routeKind } from './lib/routes';
+  import { router } from './lib/router.svelte';
   import Landing from './landing/Landing.svelte';
+  import AppLayout from './app/AppLayout.svelte';
   import Login from './auth/Login.svelte';
   import Signup from './auth/Signup.svelte';
   import Verify from './auth/Verify.svelte';
-  import AppLayout from './app/AppLayout.svelte';
+  import Dashboard from './app/pages/Dashboard.svelte';
+  import Documents from './app/pages/Documents.svelte';
+  import Templates from './app/pages/Templates.svelte';
+  import Signings from './app/pages/Signings.svelte';
+  import Analytics from './app/pages/Analytics.svelte';
+  import Team from './app/pages/Team.svelte';
+  import Settings from './app/pages/Settings.svelte';
+  import Billing from './app/pages/Billing.svelte';
+  import Audit from './app/pages/Audit.svelte';
+  import Integrations from './app/pages/Integrations.svelte';
+  import Help from './app/pages/Help.svelte';
+  import Profile from './app/pages/Profile.svelte';
 
-  let route = $state(window.location.hash);
-  let path = $derived(route.split('?')[0]);
-  let kind = $derived(routeKind(path));
-  let loggedIn = $derived(auth.user !== null);
+  const appPages = {
+    '/dashboard': Dashboard,
+    '/documents': Documents,
+    '/templates': Templates,
+    '/signings': Signings,
+    '/analytics': Analytics,
+    '/team': Team,
+    '/settings': Settings,
+    '/billing': Billing,
+    '/audit': Audit,
+    '/integrations': Integrations,
+    '/help': Help,
+    '/profile': Profile,
+  } as const;
 
-  onMount(() => {
+  const guestPages = { '/login': Login, '/signup': Signup } as const;
+
+  let ready = $state(false);
+
+  onMount(async () => {
     theme.init();
     auth.init();
+    router.init();
+    await auth.loadProfile();
+    ready = true;
   });
 
-  // The guard. Runs on every hash change and whenever login state changes.
-  $effect(() => {
-    if (loggedIn && (kind === 'root' || kind === 'guest')) window.location.hash = '#/dashboard';
-    if (!loggedIn && kind === 'auth') window.location.hash = '#/';
+  let loggedIn = $derived(auth.profile !== null);
+  let kind = $derived.by(() => {
+    const p = router.path;
+    if (p === '/') return 'root';
+    if (p in guestPages) return 'guest';
+    if (p === '/verify') return 'open';
+    if (p in appPages) return 'auth';
+    return 'unknown';
   });
+
+  // The guard. Runs whenever the URL or the login state changes.
+  $effect(() => {
+    if (!ready) return;
+    if (kind === 'unknown') router.navigate('/', { replace: true });
+    else if (loggedIn && (kind === 'root' || kind === 'guest')) router.navigate('/dashboard', { replace: true });
+    else if (!loggedIn && kind === 'auth') router.navigate('/login', { replace: true });
+  });
+
+  let AppPage = $derived(appPages[router.path as keyof typeof appPages]);
+  let GuestPage = $derived(guestPages[router.path as keyof typeof guestPages]);
 </script>
 
-<svelte:window onhashchange={() => (route = window.location.hash)} />
-
-{#if kind === 'auth' && loggedIn}
-  <AppLayout {path} />
-{:else if path === '#/login'}
-  <Login />
-{:else if path === '#/signup'}
-  <Signup />
-{:else if path === '#/verify'}
+{#if !ready}
+  <div class="grid min-h-screen place-items-center bg-bg-base text-fg-muted">Loading…</div>
+{:else if kind === 'auth' && loggedIn && AppPage}
+  <AppLayout>
+    {#key router.path}
+      <AppPage />
+    {/key}
+  </AppLayout>
+{:else if kind === 'guest' && !loggedIn && GuestPage}
+  <GuestPage />
+{:else if kind === 'open'}
   <Verify />
-{:else}
+{:else if kind === 'root' && !loggedIn}
   <Landing />
 {/if}
 ```
 
-`auth.init()` reads the stored user synchronously, so `loggedIn` is correct on the first render and the guard does not flash the wrong screen. A stale stored user (token long expired) is handled by the shell's `/me` call in B3: `authFetch` clears auth and redirects on a failed refresh.
+Notes for the implementer:
 
-Redirect targets to update: `Login.svelte` and `Verify.svelte` go to `#/dashboard` instead of `#/app`. In `Hero.svelte` and `FinalCta.svelte`, `#/app` becomes `#/signup`; in `Nav.svelte`'s mobile menu, "Open the app" becomes "Sign in" → `#/login`. Delete `src/Dashboard.svelte`. `grep -rn '#/app' src` must return nothing.
+- Svelte 5 components are dynamic by default: `<AppPage />` where `AppPage` is a `$derived` variable renders whichever component it holds. `<svelte:component>` is deprecated; do not use it.
+- The `{#if}` chain only renders a page when the guard would not redirect. During the one frame between a URL change and the redirect, nothing flashes.
+- `{#key router.path}` remounts the page when the URL changes so `Dashboard.svelte`'s `onMount` fetch runs again when navigating away and back.
 
-### B3 — Layout
+### 4.4 Replace every hash reference
 
-`src/app/AppLayout.svelte` receives `path`, loads the profile once, and picks the page:
+This is the complete list. `grep -rn "#/" apps/frontend/src` must print nothing when you are done (in-page anchors like `#features` do not contain `#/`).
 
-```svelte
-<script lang="ts">
-  import { onMount } from 'svelte';
-  import { auth } from '../lib/auth.svelte';
-  import { me } from '../lib/api';
-  import Navbar from './Navbar.svelte';
-  import Sidebar from './Sidebar.svelte';
-  import Placeholder from './Placeholder.svelte';
-  import Dashboard from '../dashboard/Dashboard.svelte';
-  import { PAGES } from './pages';
+| File | Line today | Change |
+| --- | --- | --- |
+| `landing/Hero.svelte` | `href="#/app"` | `href="/dashboard"` |
+| `landing/Nav.svelte` | `href="#/login"`, `href="#/signup"`, `href="#/app"` | `/login`, `/signup`, `/dashboard` |
+| `landing/FinalCta.svelte` | `href="#/app"` | `href="/dashboard"` |
+| `auth/Login.svelte` | `window.location.hash = '#/app'` | `await auth.loadProfile(); router.navigate('/dashboard');` |
+| `auth/Login.svelte` | `href="#/signup"` | `href="/signup"` |
+| `auth/Signup.svelte` | ``window.location.hash = `#/verify?email=…` `` | ``router.navigate(`/verify?email=${encodeURIComponent(email.trim())}`)`` |
+| `auth/Signup.svelte` | `href="#/login"` | `href="/login"` |
+| `auth/Verify.svelte` | `import { hashParam } from '../lib/hash'` + `hashParam('email')` | `import { router } from '../lib/router.svelte'` + `router.query.get('email') ?? ''` |
+| `auth/Verify.svelte` | `window.location.hash = '#/app'` | `await auth.loadProfile(); router.navigate('/dashboard');` (import `auth`) |
+| `auth/Verify.svelte` | `href="#/signup"` | `href="/signup"` |
+| `app/navbar/UserMenu.svelte` | `window.location.hash = '#/'` | `router.navigate('/')` |
+| `app/Sidebar.svelte` | twelve `href: '#/app/…'` | `href: '/…'` (drop `#/app`) |
+| `app/Sidebar.svelte` | `currentPath` state + `hashchange` listener + `$effect` | delete all of it; `isActive` becomes `router.path === href` |
+| `lib/hash.ts` | whole file | delete |
+| `src/Dashboard.svelte` | whole file (old demo, unused) | delete |
 
-  let { path }: { path: string } = $props();
-  let sidebarOpen = $state(false);
-
-  onMount(async () => {
-    try { auth.profile = await me(); } catch { /* authFetch already redirected */ }
-  });
-
-  let page = $derived(PAGES.find((p) => path === p.href || path.startsWith(p.href + '/')));
-</script>
-
-<div class="min-h-screen bg-bg-base text-fg">
-  <Navbar onmenu={() => (sidebarOpen = !sidebarOpen)} />
-  <div class="mx-auto flex max-w-7xl">
-    <Sidebar open={sidebarOpen} current={path} onnavigate={() => (sidebarOpen = false)} />
-    <main class="min-w-0 flex-1 px-4 py-6 sm:px-6">
-      {#if path === '#/dashboard'}
-        <Dashboard />
-      {:else if page}
-        <Placeholder title={page.label} />
-      {:else}
-        <Placeholder title="Not found" />
-      {/if}
-    </main>
-  </div>
-</div>
-```
-
-`src/app/pages.ts` is the sidebar as data. `roles` is the set of user types that see the section; `undefined` means everyone:
+In `Login.svelte` the `try` block becomes:
 
 ```ts
-import type { Profile } from '../lib/api';
-type UserType = Profile['user']['type'];
-
-export interface Page { label: string; href: string }
-export interface Section { title: string; roles?: UserType[]; pages: Page[] }
-
-export const SECTIONS: Section[] = [
-  { title: 'Workspace', pages: [
-    { label: 'Dashboard', href: '#/dashboard' },
-    { label: 'Documents', href: '#/documents' },
-    { label: 'Templates', href: '#/templates' },
-  ]},
-  { title: 'Billing', roles: ['OWNER', 'PERSONAL'], pages: [
-    { label: 'Top up', href: '#/billing/top-up' },
-    { label: 'Usage', href: '#/billing/usage' },
-    { label: 'Plan history', href: '#/billing/plans' },
-  ]},
-  { title: 'Member management', roles: ['OWNER', 'ADMIN'], pages: [
-    { label: 'Member list', href: '#/members' },
-    { label: 'Invitations', href: '#/members/invitations' },
-  ]},
-  { title: 'Settings', pages: [
-    { label: 'Profile', href: '#/settings/profile' },
-    { label: 'Security', href: '#/settings/security' },
-    { label: 'Notifications', href: '#/settings/notifications' },
-    { label: 'Api keys', href: '#/settings/api-keys' },
-    { label: 'Delete account', href: '#/settings/delete-account' },
-  ]},
-];
-
-export const PAGES: Page[] = SECTIONS.flatMap((s) => s.pages);
+      const result = await login(email.trim(), password);
+      auth.save(result.access_token, result.refresh_token);
+      await auth.loadProfile();
+      router.navigate('/dashboard');
 ```
 
-**Sidebar** renders `SECTIONS`, skipping a section when `roles` is set and does not include `auth.profile?.user.type`. Until the profile has loaded, render only sections without `roles`; the billing and member sections appear a moment later rather than flashing for the wrong user. The current page's link gets `aria-current="page"` and the accent text color. On screens under `md`, the sidebar is hidden unless `open`; the navbar's menu button toggles it.
+### 4.5 Phase A test
 
-**Navbar**, left to right: brand (links to `#/dashboard`), then on the right: `Wallet`, `ThemeToggle` (reuse `landing/ThemeToggle.svelte` as is), `UserMenu`, and a menu button visible under `md`.
+Start both servers (`bun run db:up`, then `bun run dev` from the root). Note the port Vite prints; it is 5173 unless something else holds it.
 
-**Wallet** shows `auth.profile.wallet` formatted with `new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Number(balance))`. `Number()` is acceptable here because it is display only; nothing computes with it. Render nothing until the profile has loaded.
+| # | Do | Expect |
+| --- | --- | --- |
+| A1 | Open `http://localhost:5173/` as a guest | landing page, URL stays `/` |
+| A2 | Click "Sign in" in the nav | URL `/login`, no page reload (the Vite console does not print a new request for `index.html`) |
+| A3 | Log in | URL `/dashboard`, the dashboard renders with the user's name in the navbar. **Not** the login page again (3.4) |
+| A4 | Press Back | URL `/login` → guard sends you to `/dashboard` again; pressing Back once more leaves the site (no loop) |
+| A5 | Type `/documents` in the address bar and press Enter | Documents placeholder inside the app shell |
+| A6 | Type `/nope` | URL becomes `/dashboard` (logged in) |
+| A7 | Log out from the user menu | URL `/`, landing page |
+| A8 | Type `/dashboard` as a guest | URL becomes `/login` |
+| A9 | On the landing page click "Features" in the nav | page scrolls, URL is `/#features`, no route change |
+| A10 | Sign up with a new email | URL `/verify?email=…`, the email shows on the page |
+| A11 | Enter the code from Mailpit (`http://localhost:8025`) | URL `/dashboard` |
+| A12 | `bun run check` | 0 errors (the two PieChart errors may remain until Phase C; everything else must be clean) |
 
-**UserMenu** is a button with the user's name and a chevron. Clicking toggles a dropdown with one item, "Log out". Requirements that are easy to skip:
-
-- the button has `aria-haspopup="menu"` and `aria-expanded`
-- the dropdown has `role="menu"`, the item `role="menuitem"`
-- Escape closes it; clicking anywhere outside closes it (a `<svelte:window onclick>` that checks `event.target` is outside the menu's element)
-- logout: `await logout(auth.refreshToken).catch(() => {})`, then `auth.clear()`, then `window.location.hash = '#/'`. The `catch` is deliberate — if the server says the token is already invalid, the user still wanted out.
-
-**Placeholder** is a heading with the title and one muted line, "Coming soon." Nothing else.
-
-### Phase B check
-
-Sign up as an organization (you are `OWNER`) and as a personal user in two browsers. Walk the table in section 8, rows 1–14.
+Commit as `feat: path-based routing (closes #18)`.
 
 ---
 
-## 7. Phase C — dashboard
+## 5. Phase B — Melt wrappers and auth pages
 
-### C1 — Range math
+### 5.1 Install and reset styles
 
-`src/dashboard/range.ts` implements the table in 3.8:
-
-```ts
-export type Filter = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month' | 'last-month' | 'this-year' | 'last-year';
-export type Granularity = 'hour' | 'day' | 'month';
-
-export const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'today', label: 'Today' }, { id: 'yesterday', label: 'Yesterday' },
-  { id: 'this-week', label: 'This week' }, { id: 'last-week', label: 'Last week' },
-  { id: 'this-month', label: 'This month' }, { id: 'last-month', label: 'Last month' },
-  { id: 'this-year', label: 'This year' }, { id: 'last-year', label: 'Last year' },
-];
-
-export interface Range {
-  from: Date;
-  to: Date;
-  granularity: Granularity;
-  peakLabel: 'hour' | 'day' | 'week' | 'month';
-  averageLabel: 'hour' | 'day' | 'week' | 'month';
-}
-
-function startOfDay(d: Date) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-function startOfWeek(d: Date) { const s = startOfDay(d); s.setDate(s.getDate() - ((s.getDay() + 6) % 7)); return s; } // Monday
-function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
-function addMonths(d: Date, n: number) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
-function addYears(d: Date, n: number) { return new Date(d.getFullYear() + n, 0, 1); }
-
-export function rangeFor(filter: Filter, now = new Date()): Range {
-  switch (filter) {
-    case 'today':      { const from = startOfDay(now);              return { from, to: addDays(from, 1),   granularity: 'hour',  peakLabel: 'hour',  averageLabel: 'hour' }; }
-    case 'yesterday':  { const from = addDays(startOfDay(now), -1); return { from, to: addDays(from, 1),   granularity: 'hour',  peakLabel: 'hour',  averageLabel: 'hour' }; }
-    case 'this-week':  { const from = startOfWeek(now);             return { from, to: addDays(from, 7),   granularity: 'day',   peakLabel: 'day',   averageLabel: 'day' }; }
-    case 'last-week':  { const from = addDays(startOfWeek(now), -7);return { from, to: addDays(from, 7),   granularity: 'day',   peakLabel: 'day',   averageLabel: 'day' }; }
-    case 'this-month': { const from = addMonths(now, 0);            return { from, to: addMonths(from, 1), granularity: 'day',   peakLabel: 'week',  averageLabel: 'week' }; }
-    case 'last-month': { const from = addMonths(now, -1);           return { from, to: addMonths(from, 1), granularity: 'day',   peakLabel: 'week',  averageLabel: 'week' }; }
-    case 'this-year':  { const from = addYears(now, 0);             return { from, to: addYears(from, 1),  granularity: 'month', peakLabel: 'month', averageLabel: 'month' }; }
-    case 'last-year':  { const from = addYears(now, -1);            return { from, to: addYears(from, 1),  granularity: 'month', peakLabel: 'month', averageLabel: 'month' }; }
-  }
-}
-
-/** Every bucket start in the range, in local time, so the chart shows zeros where the server sent nothing. */
-export function bucketsFor(range: Range): Date[] {
-  const out: Date[] = [];
-  for (let d = new Date(range.from); d < range.to; ) {
-    out.push(new Date(d));
-    if (range.granularity === 'hour') d.setHours(d.getHours() + 1);
-    else if (range.granularity === 'day') d.setDate(d.getDate() + 1);
-    else d.setMonth(d.getMonth() + 1);
-  }
-  return out;
-}
-
-/** The server's bucket key for a local Date. Must match to_char in dashboard.service.ts byte for byte. */
-export function bucketKey(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:00:00`;
-}
-```
-
-`bucketsFor` produces midnight dates for `day` and `month`, so the hour part is `00` there, matching what the server's `date_trunc` emits. If the two formats ever disagree, every bucket silently reads zero — test row 20 catches this.
-
-Peak and average, also in this file:
-
-```ts
-export interface Summary { peak: string; average: string }
-
-export function summarize(range: Range, counts: number[], buckets: Date[]): Summary {
-  const total = counts.reduce((a, b) => a + b, 0);
-  if (total === 0) return { peak: '—', average: '0' };
-
-  let peak: string;
-  if (range.peakLabel === 'week') {
-    // Month filter: fold daily counts into weeks of the month, 1..5.
-    const weeks = [0, 0, 0, 0, 0];
-    buckets.forEach((d, i) => { weeks[Math.ceil(d.getDate() / 7) - 1] += counts[i]; });
-    peak = String(weeks.indexOf(Math.max(...weeks)) + 1);
-  } else {
-    const i = counts.indexOf(Math.max(...counts));
-    const d = buckets[i];
-    peak = range.peakLabel === 'hour' ? String(d.getHours())
-         : range.peakLabel === 'day' ? String(((d.getDay() + 6) % 7) + 1)   // Monday = 1
-         : String(d.getMonth() + 1);
-  }
-
-  const periods = range.averageLabel === 'hour' ? 24
-                : range.averageLabel === 'day' ? 7
-                : range.averageLabel === 'week' ? buckets.length / 7
-                : 12;
-  return { peak, average: (total / periods).toFixed(1) };
-}
-```
-
-### C2 — Data loading
-
-`api.ts` gains:
-
-```ts
-export const analytics = (from: Date, to: Date, granularity: string) =>
-  authFetch<{ totals: { uploaded: number; draft: number; sent: number; completed: number }; series: { bucket: string; count: number }[] }>(
-    `/api/dashboard/analytics?${new URLSearchParams({
-      from: from.toISOString(), to: to.toISOString(), granularity,
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    })}`
-  );
-export const recentDocuments = () => authFetch<{ id: string; title: string; status: string; createdAt: string }[]>('/api/dashboard/recent');
-```
-
-In `Dashboard.svelte`: `let filter = $state<Filter>('today')`; an `$effect` that reruns whenever `filter` changes: compute `range = rangeFor(filter)`, call `analytics(...)`, then build `counts` by mapping `bucketsFor(range)` through a `Map` of the server's `series` keyed by `bucket`. Show a `busy` state while loading and an inline error on failure. Load `recentDocuments()` once on mount; it does not depend on the filter.
-
-### C3 — Clock and greeting
-
-`Clock.svelte`:
-
-```svelte
-<script lang="ts">
-  let { name }: { name: string } = $props();
-  let now = $state(new Date());
-
-  $effect(() => {
-    const id = setInterval(() => (now = new Date()), 1000);
-    return () => clearInterval(id);
-  });
-
-  let greeting = $derived(now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening');
-  let date = $derived(now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
-  let time = $derived(now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }));
-</script>
-
-<h1 class="text-3xl font-bold">{greeting}, {name}</h1>
-<p class="mt-1 text-fg-muted">{date} · <span class="font-mono tabular-nums text-fg">{time}</span></p>
-```
-
-The cleanup return in `$effect` is what stops the interval when the user navigates away. `tabular-nums` keeps the digits from shifting width every second. `name` comes from `auth.profile?.user.name ?? 'there'`.
-
-### C4 — Filter and cards
-
-The filter is a row of eight buttons above everything it affects, styled exactly like the signup tabs from issue 15 (`role="tablist"`, `aria-selected`, the pill track). One row, wrapping on narrow screens.
-
-Four `StatCard`s in a `grid gap-4 sm:grid-cols-2 xl:grid-cols-4`: label in muted text, value as a large tabular number. Labels: **Uploaded**, **Draft**, **Sent**, **Completed**. No icons, no deltas, no colors on the numbers — the value is the content.
-
-### C5 — Line chart
-
-First, add three tokens to `app.css`, light in `@theme` and dark in `:root.dark`. They are the validated pair from 3.11:
+Install as in 3.1. Then add to `app.css`, after the `@layer base { … }` block:
 
 ```css
-/* @theme */
---color-chart-1: #2a78d6;   /* draft */
---color-chart-2: #eb6834;   /* sent */
---color-chart-3: #1baf7a;   /* completed */
-
-/* :root.dark */
---color-chart-1: #3987e5;
---color-chart-2: #d95926;
---color-chart-3: #199e70;
-```
-
-Tailwind v4 turns these into `stroke-chart-1`, `fill-chart-1`, `bg-chart-1`.
-
-`LineChart.svelte` — one series, so the line uses the app's `accent` and there is no legend; the section title names it:
-
-```svelte
-<script lang="ts">
-  let { counts, labels }: { counts: number[]; labels: string[] } = $props();
-
-  const W = 640, H = 220;
-  const PAD = { top: 16, right: 16, bottom: 28, left: 36 };
-  const innerW = W - PAD.left - PAD.right;
-  const innerH = H - PAD.top - PAD.bottom;
-
-  let max = $derived(Math.max(1, ...counts));
-  let xs = $derived(counts.map((_, i) => PAD.left + (counts.length === 1 ? innerW / 2 : (i / (counts.length - 1)) * innerW)));
-  let ys = $derived(counts.map((v) => PAD.top + innerH - (v / max) * innerH));
-  let path = $derived(xs.map((x, i) => `${i === 0 ? 'M' : 'L'}${x} ${ys[i]}`).join(' '));
-  let ticks = $derived([0, 0.5, 1].map((f) => ({ y: PAD.top + innerH - f * innerH, v: Math.round(f * max) })));
-  let labelEvery = $derived(Math.ceil(labels.length / 8));
-
-  let hover = $state<number | null>(null);
-  function onMove(event: MouseEvent) {
-    const box = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
-    const x = ((event.clientX - box.left) / box.width) * W;
-    let nearest = 0;
-    for (let i = 1; i < xs.length; i++) if (Math.abs(xs[i] - x) < Math.abs(xs[nearest] - x)) nearest = i;
-    hover = nearest;
+/* Melt UI renders popovers and dialogs with the browser's own elements,
+   which carry default styles Tailwind does not reset. */
+@layer components {
+  [data-melt-popover-content],
+  [data-melt-tooltip-content] {
+    margin: 0;
+    inset: auto;
+    border: 0;
+    padding: 0;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    background: transparent;
+    color: inherit;
   }
-</script>
 
-<svg viewBox="0 0 {W} {H}" class="w-full" role="img" aria-label="Uploaded documents over time"
-     onmousemove={onMove} onmouseleave={() => (hover = null)}>
-  {#each ticks as t}
-    <line x1={PAD.left} x2={W - PAD.right} y1={t.y} y2={t.y} class="stroke-gray-1 dark:stroke-gray-2" stroke-width="1" />
-    <text x={PAD.left - 8} y={t.y + 4} text-anchor="end" class="fill-fg-muted text-[10px]">{t.v}</text>
-  {/each}
-  <path d={path} fill="none" class="stroke-accent" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-  {#each xs as x, i}
-    {#if i % labelEvery === 0}
-      <text {x} y={H - 8} text-anchor="middle" class="fill-fg-muted text-[10px]">{labels[i]}</text>
-    {/if}
-    {#if hover === i}
-      <line x1={x} x2={x} y1={PAD.top} y2={PAD.top + innerH} class="stroke-fg-muted/40" stroke-width="1" />
-      <circle cx={x} cy={ys[i]} r="5" class="fill-accent stroke-bg-elevated" stroke-width="2" />
-    {/if}
-  {/each}
-</svg>
-<p class="mt-2 h-5 text-sm text-fg-muted" aria-live="polite">
-  {#if hover !== null}{labels[hover]}: <span class="font-medium text-fg">{counts[hover]}</span> uploaded{/if}
-</p>
+  [data-melt-dialog-overlay] {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    padding: 0;
+    background: rgb(0 0 0 / 0.5);
+  }
+
+  dialog[data-melt-dialog-content] {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    max-width: none;
+    max-height: none;
+    background: transparent;
+    color: inherit;
+  }
+  dialog[data-melt-dialog-content]::backdrop {
+    background: transparent; /* the overlay element does the dimming */
+  }
+
+  /* A drawer is a dialog pinned to the left edge. */
+  dialog.drawer {
+    position: fixed;
+    inset: 0 auto 0 0;
+    height: 100dvh;
+    width: min(18rem, 85vw);
+  }
+}
 ```
 
-Under the chart, `Dashboard.svelte` shows the summary line from `summarize()`: **Peak {peakLabel}: 14 · Average per {averageLabel}: 2.3**. Labels for the x axis: hours as `"06"`, days as `"Mon 14"` (weeks) or `"14"` (months), months as `"Sep"` — build them from the same `buckets` array with `toLocaleDateString`/`getHours`.
+Melt positions popovers and tooltips with inline `top`/`left` (via floating-ui), which override the `inset: auto` above for those two sides. That is intended.
 
-The hover paragraph has a fixed height so the layout does not jump when it appears. The `2px` line, `r="5"` marker with a surface-colored ring, and hairline solid gridlines are deliberate; do not thicken them.
-
-### C6 — Pie chart
-
-`PieChart.svelte`, a donut with the legend carrying the percentages:
+### 5.2 The one pattern every wrapper uses
 
 ```svelte
 <script lang="ts">
-  let { draft, sent, completed }: { draft: number; sent: number; completed: number } = $props();
+  import { Tabs as TabsBuilder } from 'melt/builders';
+  let { value = $bindable() } = $props();
 
-  const R = 40;
-  const C = 2 * Math.PI * R;
-  const GAP = 2;
-
-  let slices = $derived.by(() => {
-    const raw = [
-      { label: 'Draft', value: draft, cls: 'stroke-chart-1', swatch: 'bg-chart-1' },
-      { label: 'Sent', value: sent, cls: 'stroke-chart-2', swatch: 'bg-chart-2' },
-      { label: 'Completed', value: completed, cls: 'stroke-chart-3', swatch: 'bg-chart-3' },
-    ];
-    const total = raw.reduce((s, x) => s + x.value, 0);
-    let offset = 0;
-    return raw.map((s) => {
-      const frac = total ? s.value / total : 0;
-      const slice = { ...s, frac, dash: `${Math.max(0, frac * C - GAP)} ${C}`, offset: -offset * C };
-      offset += frac;
-      return slice;
-    });
+  const tabs = new TabsBuilder({
+    value: () => value,                 // getter: builder follows the prop
+    onValueChange: (v) => (value = v),  // builder writes back to the prop
   });
-  let total = $derived(draft + sent + completed);
 </script>
 
-<div class="flex flex-wrap items-center gap-6">
-  <svg viewBox="0 0 100 100" class="h-40 w-40 shrink-0" role="img" aria-label="Documents by status">
-    <circle cx="50" cy="50" r={R} fill="none" class="stroke-gray-1 dark:stroke-gray-2" stroke-width="14" />
-    {#each slices as s}
-      {#if s.frac > 0}
-        <circle cx="50" cy="50" r={R} fill="none" class={s.cls} stroke-width="14"
-                stroke-dasharray={s.dash} stroke-dashoffset={s.offset} transform="rotate(-90 50 50)" />
-      {/if}
+<button {...tabs.getTrigger('a')}>A</button>
+```
+
+Three rules, each learned the hard way:
+
+1. **Pass getters, not values**, for anything that can change: `value: () => value`, `maxLength: () => length`. Passing `value` directly compiles but the builder keeps the initial value forever, and `svelte-check` warns `state_referenced_locally`.
+2. **Never put your own `onclick` on an element that receives a Melt spread.** The spread already contains `onclick`; whichever is written last wins and the other is silently dropped. React to changes through the builder's callbacks (`onValueChange`, `onOpenChange`) instead.
+3. **Import the builder under an alias** (`Tabs as TabsBuilder`) when the wrapper file has the same name, so the file reads unambiguously.
+
+### 5.3 `ui/Tabs.svelte` *(verified)*
+
+```svelte
+<script lang="ts" generics="T extends string">
+  import { Tabs as TabsBuilder } from 'melt/builders';
+  import type { Snippet } from 'svelte';
+
+  interface Props {
+    value: T;
+    items: { id: T; label: string }[];
+    /** Accessible name for the tab list, e.g. "Account type". */
+    label: string;
+    /** Extra classes for the list, e.g. "grid-cols-2" or "overflow-x-auto". */
+    listClass?: string;
+    /** Custom trigger rendering (used for the testimonial dots). */
+    trigger?: Snippet<[{ id: T; label: string }, boolean]>;
+    /** The panel. Rendered once, for the active tab. */
+    children?: Snippet<[T]>;
+  }
+  let { value = $bindable(), items, label, listClass = '', trigger, children }: Props = $props();
+
+  const tabs = new TabsBuilder<T>({
+    value: () => value,
+    onValueChange: (v) => (value = v),
+  });
+</script>
+
+<div {...tabs.triggerList} aria-label={label} class="flex gap-1 rounded-lg bg-gray-1 p-1 dark:bg-gray-2 {listClass}">
+  {#each items as item (item.id)}
+    <button
+      {...tabs.getTrigger(item.id)}
+      type="button"
+      class="shrink-0 rounded-md px-4 py-2 text-sm font-medium text-fg-muted transition-colors duration-300 hover:text-fg data-active:bg-bg-elevated data-active:text-fg data-active:shadow-card"
+    >
+      {#if trigger}{@render trigger(item, tabs.value === item.id)}{:else}{item.label}{/if}
+    </button>
+  {/each}
+</div>
+
+{#if children}
+  <div {...tabs.getContent(tabs.value)}>
+    {@render children(tabs.value)}
+  </div>
+{/if}
+```
+
+`data-active:` is a Tailwind 4 variant matching the `data-active` attribute Melt sets on the selected trigger. No class juggling in JavaScript.
+
+Keyboard: Left/Right arrows move between tabs, Home/End jump. Melt handles it; test it once.
+
+### 5.4 `ui/PinField.svelte` *(verified)*
+
+```svelte
+<script lang="ts">
+  import { PinInput } from 'melt/builders';
+
+  interface Props {
+    value: string;
+    length?: number;
+    label: string;
+    error?: string;
+    /** Called with the full code as soon as the last digit is typed or pasted. */
+    oncomplete?: (code: string) => void;
+  }
+  let { value = $bindable(), length = 6, label, error = '', oncomplete }: Props = $props();
+
+  const pin = new PinInput({
+    value: () => value,
+    onValueChange: (v) => (value = v),
+    maxLength: () => length,
+    type: 'numeric',
+    placeholder: '',
+    onComplete: (code) => oncomplete?.(code),
+  });
+</script>
+
+<div>
+  <span id="{pin.root.id}-label" class="mb-2 block text-sm font-medium text-fg">{label}</span>
+  <div {...pin.root} role="group" aria-labelledby="{pin.root.id}-label" class="flex justify-between gap-2">
+    {#each pin.inputs as input, i (i)}
+      <input
+        {...input}
+        aria-label="Digit {i + 1} of {length}"
+        aria-invalid={error ? 'true' : undefined}
+        autocomplete={i === 0 ? 'one-time-code' : 'off'}
+        class="input h-14 w-full min-w-0 px-0 text-center font-mono text-2xl data-filled:border-accent"
+      />
     {/each}
-  </svg>
-  <ul class="min-w-40 space-y-2 text-sm">
-    {#each slices as s}
-      <li class="flex items-center gap-2">
-        <span class="h-3 w-3 rounded-sm {s.swatch}"></span>
-        <span class="text-fg-muted">{s.label}</span>
-        <span class="ml-auto font-medium tabular-nums text-fg">{total ? Math.round(s.frac * 100) : 0}%</span>
-      </li>
-    {/each}
-  </ul>
+  </div>
+  {#if error}<p class="mt-2 text-sm text-red-500">{error}</p>{/if}
 </div>
 ```
 
-`GAP` leaves 2px of track between slices, which is how the eye separates them without relying on color. When `total` is 0, the track renders alone and the legend reads 0% — that is the empty state, no extra markup needed.
+Typing fills left to right and moves focus; Backspace moves back; pasting a six-digit code fills every box. At 375px six boxes with `gap-2` fit inside the 448px auth column because `min-w-0` lets them shrink.
 
-### C7 — Recent documents
+### 5.5 `ui/Menu.svelte` *(verified)*
 
-`RecentDocuments.svelte` lists up to five rows: title, a small status label (plain text, muted; no color badges), the date via `toLocaleDateString`, and a "Preview" link to `#/documents/{id}`. The Documents placeholder is where that lands; it shows the id in its subtitle so the link is verifiably wired. Empty state: "No documents yet."
+```svelte
+<script lang="ts">
+  import { Popover } from 'melt/builders';
+  import type { Snippet } from 'svelte';
 
-### C8 — Page layout
+  interface Props {
+    /** What the button shows (avatar, name, chevron). */
+    trigger: Snippet;
+    /** Menu body. Call close() after an item is chosen. */
+    children: Snippet<[{ close: () => void }]>;
+    align?: 'start' | 'end';
+    /** Classes for the trigger button. */
+    class?: string;
+  }
+  let { trigger, children, align = 'end', class: triggerClass = '' }: Props = $props();
 
+  const popover = new Popover({
+    floatingConfig: {
+      computePosition: { placement: align === 'end' ? 'bottom-end' : 'bottom-start' },
+    },
+  });
+</script>
+
+<button {...popover.trigger} type="button" class={triggerClass}>
+  {@render trigger()}
+</button>
+
+<div {...popover.content} class="surface mt-2 min-w-48 bg-bg-elevated p-1">
+  {@render children({ close: () => (popover.open = false) })}
+</div>
 ```
-[Clock / greeting]
-[filter row]
-[card] [card] [card] [card]
-[line chart — 2/3 width]   [pie — 1/3 width]
-[peak · average line under the chart]
-[recent documents]
+
+Escape and clicking outside close it; focus moves into the menu on open and back to the button on close. Verified: after a click on the trigger, the content matches `:popover-open` and has `position: absolute` with a computed `top`.
+
+### 5.6 `ui/Drawer.svelte` *(verified)*
+
+```svelte
+<script lang="ts">
+  import { Dialog } from 'melt/builders';
+  import type { Snippet } from 'svelte';
+
+  interface Props {
+    /** Contents of the open button (a hamburger icon). */
+    trigger: Snippet;
+    /** Drawer body. Call close() after a link is chosen. */
+    children: Snippet<[{ close: () => void }]>;
+    title: string;
+    /** Classes for the trigger button, e.g. "lg:hidden". */
+    class?: string;
+  }
+  let { trigger, children, title, class: triggerClass = '' }: Props = $props();
+
+  // The trigger lives inside this component on purpose; see the trap in 8.2.
+  const dialog = new Dialog();
+</script>
+
+<button {...dialog.trigger} class={triggerClass} aria-label="Open {title}">
+  {@render trigger()}
+</button>
+
+<div {...dialog.overlay}></div>
+
+<dialog {...dialog.content} class="drawer border-r border-gray-1 bg-bg-base p-4 text-fg dark:border-gray-2" aria-label={title}>
+  {@render children({ close: () => (dialog.open = false) })}
+</dialog>
 ```
 
-Every block sits in a `.surface` panel. Under `lg` the chart and pie stack. Nothing scrolls horizontally at 375px.
+Verified: clicking the trigger opens the `<dialog>` modally with the overlay shown; a button inside calling `close()` closes both. Escape and clicking the overlay also close it, and page scroll is locked while open.
 
----
+### 5.7 `ui/ToggleButton.svelte` *(verified)*
 
-## 8. Testing
+```svelte
+<script lang="ts">
+  import { Toggle } from 'melt/builders';
+  import type { Snippet } from 'svelte';
 
-Seed first: `bun run db:seed you@example.com`. Then in order.
+  interface Props {
+    pressed: boolean;
+    /** Called on every click with the new state. Use this when the parent owns the state. */
+    onchange?: (pressed: boolean) => void;
+    label: string;
+    class?: string;
+    children: Snippet<[boolean]>;
+  }
+  let { pressed = $bindable(), onchange, label, class: cls = '', children }: Props = $props();
 
-| # | Action | Expected |
+  const toggle = new Toggle({
+    value: () => pressed,
+    onValueChange: (v) => {
+      pressed = v;
+      onchange?.(v);
+    },
+  });
+</script>
+
+<button {...toggle.trigger} type="button" aria-label={label} class={cls}>
+  {@render children(pressed)}
+</button>
+```
+
+The builder adds `aria-pressed` and `data-checked`. The children snippet receives the current state so the caller can swap icons. Two ways to use it, both verified:
+
+- **Bound**, when the toggle owns the state: `<ToggleButton bind:pressed={visible} …>` (PasswordField).
+- **Controlled**, when a store owns the state: `<ToggleButton pressed={theme.current === 'dark'} onchange={() => theme.toggle()} …>` (ThemeToggle). The button re-renders because the `pressed` expression re-evaluates after the store changes.
+
+### 5.8 `ui/Tooltip.svelte` *(verified)*
+
+```svelte
+<script lang="ts">
+  import { Tooltip as TooltipBuilder } from 'melt/builders';
+  import type { Snippet } from 'svelte';
+
+  interface Props { text: string; class?: string; children: Snippet }
+  let { text, class: cls = '', children }: Props = $props();
+
+  const tooltip = new TooltipBuilder({
+    openDelay: 200,
+    floatingConfig: { computePosition: { placement: 'top' } },
+  });
+</script>
+
+<!-- tabindex makes the tooltip reachable by keyboard, not only by mouse. -->
+<span {...tooltip.trigger} tabindex="0" class={cls}>
+  {@render children()}
+</span>
+
+<div {...tooltip.content} class="surface bg-bg-elevated px-2.5 py-1.5 text-xs text-fg">
+  {text}
+</div>
+```
+
+Verified via keyboard focus (the hover path uses the same open call).
+
+### 5.9 Apply to the auth pages
+
+**`auth/PasswordField.svelte`.** Replace the eye `<button>` with `ToggleButton`. `visible` becomes the bound `pressed`:
+
+```svelte
+<ToggleButton
+  bind:pressed={visible}
+  label={visible ? 'Hide password' : 'Show password'}
+  class="absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted transition-opacity duration-300 hover:opacity-70"
+>
+  {#snippet children(on)}
+    <svg …>{#if on}…eye-off path…{:else}…eye path…{/if}</svg>
+  {/snippet}
+</ToggleButton>
+```
+
+That covers **Login** (which has no other interactive control besides plain fields).
+
+**`auth/Signup.svelte`.** Delete the hand-rolled `role="tablist"` block and the `role="tabpanel"` wrapper. Replace with:
+
+```svelte
+<Tabs bind:value={kind} label="Account type" listClass="mb-8 grid grid-cols-2" items={accountTypes}>
+  {#snippet children(active)}
+    <form id="signup-form" onsubmit={onSubmit} class="space-y-5" novalidate>
+      {#if active === 'organization'}
+        <Field label="Organization name" bind:value={organization} placeholder="Acme Inc." required />
+      {/if}
+      …the rest of the form unchanged…
+    </form>
+  {/snippet}
+</Tabs>
+```
+
+The existing `tabs` array (`{ id: 'personal', label: 'Personal' }, …`) already has the right shape; rename it to `accountTypes` so it is not confused with the component. The `Tabs` wrapper is generic over the id type, so `kind` keeps its `'personal' | 'organization'` type.
+
+**`auth/Verify.svelte`.** Replace the `<label>` + single `<input maxlength="6">` with:
+
+```svelte
+<PinField bind:value={code} label="Verification code" error={formError ? ' ' : ''} oncomplete={() => form?.requestSubmit()} />
+```
+
+and add `let form = $state<HTMLFormElement>()` plus `bind:this={form}` on the `<form>`. Entering the sixth digit submits automatically; the Verify button stays for people who paste five digits and type one. Keep the existing `formError` `<p role="alert">` below the field (that is why `error` above only passes a space: to turn the boxes red without printing the message twice).
+
+### 5.10 Phase B test
+
+| # | Do | Expect |
 | --- | --- | --- |
-| 1 | Logged out, open `/` | landing page |
-| 2 | Logged out, open `#/dashboard` | redirected to `#/`, landing page |
-| 3 | Logged out, open `#/login` | login page |
-| 4 | Log in | lands on `#/dashboard` |
-| 5 | Logged in, open `/` | redirected to `#/dashboard` |
-| 6 | Logged in, open `#/login` | redirected to `#/dashboard` |
-| 7 | Sign up a new account (still logged in from the tokens signup stores), open `#/verify?email=…` | verify page renders; not bounced |
-| 8 | Navbar shows your name; click it | dropdown opens; Escape closes; click outside closes |
-| 9 | Log out | lands on landing page; `signcraft-user` gone from localStorage; second logout call with the same refresh token is 401 |
-| 10 | As OWNER | sidebar has Billing and Member management |
-| 11 | As PERSONAL | sidebar has Billing, no Member management |
-| 12 | Click every sidebar link | each opens its placeholder with the right title; current link is highlighted |
-| 13 | Wallet in navbar | `$0.00` (or your currency) |
-| 14 | In DevTools, delete `signcraft-access-token`, reload | still logged in — `/me` refreshed the token silently |
-| 15 | Also delete `signcraft-refresh-token`, reload | bounced to login |
-| 16 | Dashboard greeting | matches the hour; clock ticks every second; date is today |
-| 17 | Filter **Today** | 24 x-labels; peak hour is the hour with the most seeded docs (compare `docker compose exec postgres psql … -c "select date_trunc('hour', created_at at time zone 'YOUR/ZONE'), count(*) from documents where creator_id = N and created_at >= … group by 1"`) |
-| 18 | Filter **This week** | 7 labels Mon–Sun; peak day 1–7 |
-| 19 | Filter **Last month** | one point per day; "Peak week" 1–5; "Average per week" |
-| 20 | Any filter: card **Uploaded** | equals the sum of the chart's points (if it does not, `bucketKey` and the server's `to_char` disagree) |
-| 21 | Pie percentages | sum to 100 (±1 rounding); draft + sent + completed cards equal Uploaded |
-| 22 | Hover the chart | crosshair, marker, and the sentence under the chart follow the cursor |
-| 23 | Change OS timezone (or `TZ=America/New_York` when launching the browser) | "Today" boundaries and peak hour shift accordingly |
-| 24 | Recent documents | five newest, newest first; Preview goes to `#/documents/<id>` |
-| 25 | Wait 16 minutes on the dashboard, change the filter | works — refresh happened; no redirect |
-| 26 | Both themes | chart line, slices, gridlines, and text all readable |
-| 27 | Width 375px | filter wraps, cards stack, chart and pie stack, no horizontal scroll |
-| 28 | `bun run check` (frontend) and `bunx tsc --noEmit` (backend) | 0 errors |
+| B1 | `/signup`, press Tab until the "Personal" tab has focus, press → | "Organization" selected, the organization field appears |
+| B2 | Same at 375px wide | both tabs fit on one row, the form has no horizontal scroll |
+| B3 | Click the eye on a password field | text shows, button has `aria-pressed="true"` (inspect) |
+| B4 | `/verify?email=…`, type six digits | focus moves box to box; after the sixth, the form submits |
+| B5 | Paste a six-digit code into the first box | all six fill |
+| B6 | Enter a wrong code | boxes get the red border, the alert text shows once |
+| B7 | Verify at 375px | six boxes on one row, none clipped |
+| B8 | Colors | tabs use `bg-gray-1`/`bg-bg-elevated`, nothing slate or blue |
+| B9 | `bun run check` | no new warnings |
+
+Commit as `feat: adopt Melt UI on auth pages`.
 
 ---
 
-## 9. Acceptance checklist
+## 6. Phase C — landing page and app shell
 
-**Phase A**
-- [ ] `controller/`, `middleware/`, `validator/`, `dto/`, `interface/`, `utils/` exist with the mandated file names; route files contain only wiring.
-- [ ] `documents` table exists with statuses `draft | sent | completed`, `TIMESTAMPTZ` timestamps, `creator_id NOT NULL`.
-- [ ] `users.balance` exists; `/me` returns the owner's balance for `MEMBER`/`ADMIN`.
-- [ ] `authMiddleware` uses `{ as: 'scoped' }` on both hooks; register and login remain public.
-- [ ] `POST /api/logout` returns the exact success body; unknown token → `401 { "error": "Invalid token" }`.
-- [ ] `POST /api/refresh` renews an access token; expired or unknown refresh token → 401.
-- [ ] Analytics passes `from`/`to` as ISO strings, validates `tz` with `Intl.DateTimeFormat`, and buckets in `tz`.
-- [ ] The two demo `/documents` endpoints and their fallback data are gone from `index.ts`.
-- [ ] `bun run db:seed <email>` populates the dashboard.
+### 6.1 Landing `Nav.svelte`: mobile menu becomes a Drawer
 
-**Phase B**
-- [ ] The guard implements the four-row table in 3.1; `#/verify` is open.
-- [ ] `#/app` no longer exists anywhere (`grep -rn '#/app' apps/frontend/src` is empty); `src/Dashboard.svelte` is deleted.
-- [ ] `authFetch` refreshes once on 401 and signs out on failure.
-- [ ] Navbar: user menu with keyboard-closable dropdown and logout; theme toggle; wallet.
-- [ ] Sidebar: Billing only for OWNER/PERSONAL; Member management only for OWNER/ADMIN; current page marked.
-- [ ] Twelve placeholder pages reachable from the sidebar.
+Delete `mobileOpen` and the `{#if mobileOpen}` list. Replace the hamburger `<button>` with:
 
-**Phase C**
-- [ ] Greeting by hour; clock updates every second and stops when the page unmounts.
-- [ ] Eight filters; cards, chart, and pie all react to the filter.
-- [ ] Chart buckets, peak, and average follow the table in 3.8; zero-count buckets render as zero, not gaps.
-- [ ] Peak uses the browser's timezone.
-- [ ] Pie has a legend with percentages and 2px gaps between slices.
-- [ ] Recent list shows five, newest first, with a Preview link.
-- [ ] Frontend `bun run check` and backend `bunx tsc --noEmit` report 0 errors.
+```svelte
+<Drawer title="navigation menu" class="grid h-10 w-10 place-items-center rounded-lg border border-gray-1 dark:border-gray-2 md:hidden">
+  {#snippet trigger()}
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path d="M3 6h18M3 12h18M3 18h18" />
+    </svg>
+  {/snippet}
+  {#snippet children({ close })}
+    <ul class="space-y-1">
+      {#each links as link}
+        <li><a href={link.href} onclick={close} class="block rounded-lg px-3 py-2.5 text-sm font-medium text-fg-muted transition-colors duration-300 hover:text-fg">{link.label}</a></li>
+      {/each}
+      <li><a href="/login" onclick={close} class="block rounded-lg px-3 py-2.5 text-sm font-medium text-fg-muted">Sign in</a></li>
+      <li><a href="/dashboard" onclick={close} class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-accent">Open the app</a></li>
+    </ul>
+  {/snippet}
+</Drawer>
+```
+
+`onclick={close}` on the links is fine: those `<a>` elements do not receive a Melt spread (rule 2 in 5.2 is about the trigger). The in-page links (`#features`) still scroll after the drawer closes because the router ignores them and the browser handles the hash.
+
+### 6.2 Both `ThemeToggle.svelte` files
+
+There are two (`landing/ThemeToggle.svelte` and `app/navbar/ThemeToggle.svelte`) with near-identical markup. Rewrite the landing one with `ToggleButton` and delete the navbar one; `app/Navbar.svelte` imports the landing one.
+
+```svelte
+<script lang="ts">
+  import { theme } from '../lib/theme.svelte';
+  import ToggleButton from '../ui/ToggleButton.svelte';
+
+  let dark = $derived(theme.current === 'dark');
+</script>
+
+<ToggleButton
+  pressed={dark}
+  onchange={() => theme.toggle()}
+  label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+  class="relative grid h-10 w-10 place-items-center rounded-lg transition-opacity duration-300 hover:opacity-70"
+>
+  {#snippet children(on)}
+    …the two SVGs from today's file, using `on` where they used `isDark`…
+  {/snippet}
+</ToggleButton>
+```
+
+This is the *controlled* form from 5.7: the store owns the state, the button only reports clicks. Do **not** `bind:pressed` here and do not copy `theme.current` into a local `$state`: child components mount before `App.svelte` calls `theme.init()`, so a local copy would capture the default and then overwrite the user's saved choice. Verify the `<html>` element gains and loses the `dark` class, and that a reload keeps the choice.
+
+### 6.3 `Testimonials.svelte`: dots become Tabs
+
+The three dots are a hand-rolled tab list. Use the wrapper's `trigger` snippet for the dot rendering:
+
+```svelte
+<Tabs
+  bind:value={current}
+  label="Testimonials"
+  listClass="mt-8 justify-center bg-transparent p-0 dark:bg-transparent"
+  items={testimonials.map((t, i) => ({ id: String(i), label: `Testimonial ${i + 1} of ${testimonials.length}` }))}
+>
+  {#snippet trigger(item, active)}
+    <span class="sr-only">{item.label}</span>
+    <span class="block h-2.5 rounded-full transition-all duration-300 {active ? 'w-8 bg-accent' : 'w-2.5 bg-gray-2 dark:bg-gray-1'}"></span>
+  {/snippet}
+  {#snippet children(id)}
+    <article class="surface p-8 md:p-16">
+      …today's article, reading testimonials[Number(id)]…
+    </article>
+  {/snippet}
+</Tabs>
+```
+
+`current` becomes a string (`$state('0')`) and the auto-advance interval does `current = String((Number(current) + 1) % testimonials.length)`. Because the wrapper puts the list *above* the panel, and the design has dots *below* the quote, add `flex flex-col-reverse` to the wrapping `div` in the section. Reduce the article padding to `p-8` on mobile (today's `p-12` leaves 40px of text width at 375px).
+
+### 6.4 App shell: responsive sidebar
+
+Today `AppLayout.svelte` renders a fixed 256px `<aside>` next to the content at every width, so on a phone the dashboard gets 119px. Fix:
+
+1. Move the `<nav>` and its `sections` array from `Sidebar.svelte` into a new `app/SidebarNav.svelte` that takes an optional `onnavigate` prop and calls it when a link is clicked (`onclick={onnavigate}` on each `<a>`). Replace the `isActive`/`hashchange` code with `router.path === section.href`.
+2. `Sidebar.svelte` becomes `<aside class="hidden w-64 shrink-0 border-r border-gray-1 bg-bg-elevated dark:border-gray-2 lg:block"><SidebarNav /></aside>`.
+3. In `Navbar.svelte`, before the brand, add a `Drawer` visible only below `lg`:
+
+```svelte
+<Drawer title="sidebar" class="grid h-10 w-10 place-items-center rounded-lg hover:bg-gray-1 dark:hover:bg-gray-2 lg:hidden">
+  {#snippet trigger()}…hamburger svg…{/snippet}
+  {#snippet children({ close })}<SidebarNav onnavigate={close} />{/snippet}
+</Drawer>
+```
+
+4. Apply the color mapping from 3.5 to `AppLayout.svelte`, `Navbar.svelte`, `SidebarNav.svelte`, `Wallet.svelte`, `Placeholder.svelte`.
+5. Navbar at 375px: brand text `hidden sm:inline`, the wallet shows the amount only (drop the icon below `sm`), user menu shows the avatar only (`hidden sm:inline` on the name). Everything must fit in one row without wrapping.
+
+### 6.5 `UserMenu.svelte`: Menu
+
+Delete `showMenu`. The whole file becomes:
+
+```svelte
+<script lang="ts">
+  import { auth } from '../../lib/auth.svelte';
+  import { router } from '../../lib/router.svelte';
+  import { logout } from '../../lib/api';
+  import Menu from '../../ui/Menu.svelte';
+  import type { UserProfile } from '../../lib/api';
+
+  let { profile }: { profile: UserProfile } = $props();
+
+  async function handleLogout() {
+    const token = auth.refreshToken;
+    try {
+      if (token) await logout(token);
+    } finally {
+      auth.clear();
+      router.navigate('/');
+    }
+  }
+</script>
+
+<Menu class="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-gray-1 dark:hover:bg-gray-2">
+  {#snippet trigger()}
+    <span class="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-accent to-indigo-500 text-sm font-bold text-white">
+      {profile.user.name.charAt(0).toUpperCase()}
+    </span>
+    <span class="hidden text-sm font-medium text-fg sm:inline">{profile.user.name}</span>
+  {/snippet}
+  {#snippet children({ close })}
+    <div class="border-b border-gray-1 px-3 py-2 dark:border-gray-2">
+      <p class="truncate text-sm font-medium text-fg">{profile.user.email}</p>
+      <p class="text-xs text-fg-muted">{profile.user.type}</p>
+    </div>
+    <a href="/profile" onclick={close} class="block rounded-md px-3 py-2 text-sm text-fg hover:bg-gray-1 dark:hover:bg-gray-2">Profile</a>
+    <button type="button" onclick={() => { close(); handleLogout(); }} class="block w-full rounded-md px-3 py-2 text-left text-sm text-fg hover:bg-gray-1 dark:hover:bg-gray-2">Logout</button>
+  {/snippet}
+</Menu>
+```
+
+Note the `finally`: today a failed `/api/logout` call leaves the user logged in with a stale session. Clearing locally regardless is the right behaviour; the server session expires in seven days anyway.
+
+### 6.6 Dashboard: Tabs for the range, Tooltip for the bars, reactive charts
+
+**Range filter.** In `app/pages/Dashboard.svelte` replace the six `<button>`s with:
+
+```svelte
+<Tabs
+  bind:value={range}
+  label="Time range"
+  listClass="overflow-x-auto"
+  items={ranges.map((r) => ({ id: r, label: rangeLabel(r) }))}
+/>
+```
+
+and replace `handleRangeChange` with `$effect(() => { range; loadData(); })` — reading `range` inside the effect makes it re-run on every change. Delete the `onMount` call to `loadData()`; the effect runs once on mount already. At 375px the six triggers overflow and the list scrolls horizontally (`shrink-0` on the triggers keeps them from squashing). The tab list has no panel here, so `children` is omitted.
+
+**Bar tooltips.** In `LineChart.svelte` wrap each bar:
+
+```svelte
+<Tooltip text="{item.count} {item.count === 1 ? 'document' : 'documents'}" class="block w-full">
+  <div class="w-full rounded-t bg-accent transition hover:opacity-80" style="height: {getHeight(item.count)}%"></div>
+</Tooltip>
+```
+
+and delete the `title` attribute. The wrapping `<span>` needs `class="block w-full"` and the bar column needs `h-full` so percentage heights still resolve.
+
+**Reactivity fixes (3.6).** In `LineChart.svelte`, `PieChart.svelte`, `StatCard.svelte`, and `Wallet.svelte`, every `const x = f(prop)` at the top of the script must become `let x = $derived(f(prop))`. For example in `LineChart.svelte`:
+
+```ts
+let maxValue = $derived(Math.max(...series.map((s) => s.count), 1));
+```
+
+and in `PieChart.svelte` `slices` and `paths` become `$derived`, with `paths` typed as `{ path: string; color: string }[]` (that also fixes the two `svelte-check` errors). Before this fix, switching the range from "This Month" to "Today" re-fetched data but the chart kept the old bars.
+
+**Mobile labels.** With "This Month" the chart has up to 30 buckets; at 375px the date labels overlap. Show a label only when `i % Math.ceil(series.length / 6) === 0`; the tooltip carries the exact value for the rest.
+
+**Colors.** Apply the 3.5 mapping to `Dashboard.svelte`, `StatCard.svelte`, `LineChart.svelte`, `PieChart.svelte`, `RecentDocuments.svelte`, `Clock.svelte`. The status colors listed in 3.5 stay.
+
+### 6.7 Phase C test
+
+| # | Do | Expect |
+| --- | --- | --- |
+| C1 | Landing at 375px, tap the hamburger | drawer slides in from the left over a dimmed page; page does not scroll behind it |
+| C2 | Tap "Features" in the drawer | drawer closes, page scrolls to Features |
+| C3 | Press Escape with the drawer open | closes; focus returns to the hamburger |
+| C4 | Landing at 1024px | no hamburger; the three links and both buttons are in the header |
+| C5 | Theme toggle on landing and in the app | `<html class="dark">` toggles; reload keeps the choice |
+| C6 | Testimonials: press Tab to a dot, press → | next quote shows; wait 8 s, it advances by itself |
+| C7 | Dashboard at 375px | sidebar hidden, hamburger in the navbar, navbar fits in one row, no horizontal scroll anywhere |
+| C8 | Open the sidebar drawer, tap "Documents" | URL `/documents`, drawer closed |
+| C9 | Dashboard at 1280px | sidebar always visible, no hamburger |
+| C10 | Click the avatar | menu opens below-right of the button, inside the viewport; click elsewhere closes it |
+| C11 | Menu → Logout | URL `/`, landing page; `localStorage` has no `signcraft-*` keys |
+| C12 | Switch range "This Month" → "Today" | stat cards, bars and pie all change (they did not before 6.6) |
+| C13 | Range tabs at 375px | scroll sideways with a finger/trackpad; the active tab is highlighted |
+| C14 | Hover a bar, then Tab to a bar | tooltip with "3 documents" appears both ways |
+| C15 | `grep -rn "slate-\|blue-500\|blue-100" apps/frontend/src` | only `RecentDocuments.svelte` (status badges) and `PieChart.svelte` (`#3b82f6`) |
+| C16 | `bun run check` | 0 errors, 0 warnings in files touched by this ticket |
+| C17 | `bun run build` in `apps/frontend` | succeeds |
+
+Commit as `feat: adopt Melt UI on landing and app shell; responsive sidebar`.
 
 ---
 
-## 10. Mistakes to avoid
+## 7. Responsive checklist (run on every page, both phases)
 
-**Implementing the four redirect rules as written.** Rules 1 and 2 lock everyone out. Use the table in 3.1.
+At 375px and 1440px:
 
-**Classifying `#/verify` as a guest route.** A user who just signed up is logged in and needs it.
+- No horizontal scrollbar on `<body>`. If there is one, DevTools → Elements → hover elements until the wide one highlights.
+- Every tap target at least 40×40px (`h-10 w-10` or padding that adds up).
+- Text does not touch the viewport edge: every top-level container has `px-4` or more.
+- Nothing is cut off at the bottom behind a fixed header (the landing `<header>` is fixed; sections already pad for it).
+- Rotate to landscape on a phone (667×375): the auth pages still show the form without the decorative panel (`lg:` hides it, so this is already true; confirm nothing regressed).
 
-**Passing `Date` objects into `sql\`…\`` or `client\`…\``.** The client throws. `.toISOString()` first. Drizzle's query builder (`eq`, `gt`, `.values()`) is fine with `Date`.
+---
 
-**Forgetting `{ as: 'scoped' }` on the middleware hooks.** The middleware then applies to nothing, every "protected" route is public, and no test in section 8 catches it unless you run row 2 of the Phase A curl block.
+## 8. Traps
 
-**Putting `authMiddleware` on the same plugin as register and login.** Nobody can sign up.
+### 8.1 Getters, not values
 
-**Awaiting logout before clearing local state.** If the server is down, the user is stuck logged in. Clear regardless.
+`new PinInput({ maxLength: length })` compiles and works until `length` changes; then it does not. Always `() => length`. `svelte-check` prints `state_referenced_locally` when you get this wrong. Treat that warning as an error.
 
-**Computing "start of this week" on the server.** The server does not know the browser's zone at the moment the range is chosen; the browser does. Range in the browser, counting on the server.
+### 8.2 `Dialog` ignores a bound `open` prop *(verified)*
 
-**A `bucketKey` that does not match the server's `to_char` format exactly.** Every bucket silently reads zero. Row 20 is the check.
+`new Dialog({ open: () => open })` followed by `open = true` in the parent **does not open the dialog**: Melt's `Dialog` calls `showModal()` only inside its own `open` setter, and a getter change bypasses it. Either spread `dialog.trigger` onto a button or assign `dialog.open = true` yourself. This is why `ui/Drawer.svelte` owns its trigger. (`Popover`, `Tabs`, `Toggle`, `PinInput` do follow getters correctly.)
 
-**Rendering role-gated sidebar sections before the profile loads.** They flash for the wrong user. Hide gated sections until `auth.profile` exists.
+### 8.3 Missing CSS reset
 
-**Coloring status text or card numbers.** Text wears text colors. The pie's swatches carry the color; the words stay muted.
+Symptom: the user menu opens as a white box with a black border in the centre of the screen, or the drawer appears as a small centred box. Cause: 5.1 was skipped or added in the wrong layer (it must be in `@layer components` or unlayered; inside `@layer base` Tailwind's own base rules may come later and win for `dialog`).
 
-**A `setInterval` without cleanup.** Navigate away and back a few times and the clock has five intervals running.
+### 8.4 Two `onclick`s
 
-**Using `Number(balance)` for anything but display.** It is a string from the database on purpose.
+`<button {...tabs.getTrigger(id)} onclick={…}>` — one of them is dropped. Use `onValueChange` in the builder options.
 
-**Keying the middleware's user lookup on anything but `payload.sub`.** That is where `signAccessToken` puts the user id; nothing else is in the token by design.
+### 8.5 Vite did not pick up `melt`
+
+`Failed to resolve import "melt/builders"` after installing: restart `bun run dev`. Vite caches its dependency pre-bundle in `apps/frontend/node_modules/.vite`; deleting that folder also works.
+
+### 8.6 `router.navigate` before the profile is loaded
+
+The guard reads `auth.profile`. Navigating to `/dashboard` while it is still `null` redirects to `/login`. `await auth.loadProfile()` first, every time you have just called `auth.save()`.
+
+### 8.7 The `{#key}` block and page state
+
+`{#key router.path}` in `App.svelte` destroys and recreates the page component on every URL change. That is what makes `Dashboard.svelte`'s effect re-fetch when you navigate back to it. If a future page needs to survive navigation, lift its state into a store; do not remove the key.
+
+### 8.8 `href="/dashboard"` on the landing page as a guest
+
+Goes to `/login` (guard). That is by design: guests cannot see the dashboard. Do not add a `#/app`-style bypass.
+
+### 8.9 The Tabs list without a panel
+
+`Dashboard.svelte` uses `Tabs` as a segmented control with no `children`. The triggers then carry `aria-controls` pointing at an id that does not exist. Screen readers tolerate it; axe reports it as a minor issue. Acceptable here; if it bothers a reviewer, wrap the stat cards and charts in the `children` snippet (the same content for every value) and the ids resolve.
+
+---
+
+## 9. Definition of done
+
+- Three PRs merged in order: routing → auth pages → landing and app shell.
+- Table 2.1 holds: every URL in the left column no longer exists, every URL in the right column works when typed directly into the address bar.
+- Tables 4.5, 5.10, 6.7 pass, plus the section 7 checklist on `/`, `/login`, `/signup`, `/verify`, `/dashboard`.
+- `grep -rn "#/" apps/frontend/src` prints nothing. `grep -rn "window.location.hash" apps/frontend/src` prints nothing.
+- `bun run check` in `apps/frontend`: 0 errors.
+- `bun run build` in `apps/frontend` succeeds.
+- No color class outside the `app.css` tokens except the three status colors (3.5).

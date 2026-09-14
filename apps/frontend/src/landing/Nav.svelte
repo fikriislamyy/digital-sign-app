@@ -45,13 +45,13 @@
     <div class="flex items-center gap-3">
       <ThemeToggle />
       <a
-        href="#/login"
+        href="/login"
         class="hidden text-sm font-medium text-fg-muted transition-colors duration-300 hover:text-accent sm:block"
       >
         Sign in
       </a>
       <a
-        href="#/signup"
+        href="/signup"
         class="hidden px-5 py-2 text-sm font-semibold bg-accent text-white rounded-lg transition-opacity duration-300 hover:opacity-90 sm:block"
       >
         Get started
@@ -79,7 +79,7 @@
           </a>
         </li>
       {/each}
-      <li><a href="#/app" class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-accent">Open the app</a></li>
+      <li><a href="/dashboard" class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-accent">Open the app</a></li>
     </ul>
   {/if}
 </header>

@@ -1,9 +1,10 @@
 <script lang="ts">
   import AuthLayout from './AuthLayout.svelte';
   import { verifyEmail, resendOtp } from '../lib/api';
-  import { hashParam } from '../lib/hash';
+  import { router } from '../lib/router.svelte';
+  import { auth } from '../lib/auth.svelte';
 
-  const email = hashParam('email');
+  const email = router.query.get('email') ?? '';
 
   let code = $state('');
   let formError = $state('');
@@ -24,7 +25,8 @@
     busy = true;
     try {
       await verifyEmail(email, code.trim());
-      window.location.hash = '#/app';
+      await auth.loadProfile();
+      router.navigate('/dashboard');
     } catch (error) {
       formError = error instanceof Error ? error.message : 'Could not verify that code.';
     } finally {
@@ -103,7 +105,7 @@
   {:else}
     <div class="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-600 dark:text-yellow-400">
       <p class="mb-3">No email provided. Go back to sign up.</p>
-      <a href="#/signup" class="inline-block rounded bg-yellow-600 px-4 py-2 text-white transition-opacity hover:opacity-80">
+      <a href="/signup" class="inline-block rounded bg-yellow-600 px-4 py-2 text-white transition-opacity hover:opacity-80">
         Create account
       </a>
     </div>

@@ -65,7 +65,7 @@
       {/if}
 
       <div class="flex flex-col sm:flex-row gap-4 justify-center">
-        <a href="#/app" class="inline-flex items-center justify-center px-8 py-4 bg-accent text-white font-semibold rounded-lg transition-opacity duration-300 hover:opacity-90 active:opacity-75">
+        <a href="/dashboard" class="inline-flex items-center justify-center px-8 py-4 bg-accent text-white font-semibold rounded-lg transition-opacity duration-300 hover:opacity-90 active:opacity-75">
           Start for Free
         </a>
         <a href="#features" class="inline-flex items-center justify-center px-8 py-4 bg-gray-1 text-fg font-semibold rounded-lg transition-opacity duration-300 hover:opacity-80 dark:bg-gray-2 dark:text-fg">

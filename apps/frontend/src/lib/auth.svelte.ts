@@ -1,4 +1,5 @@
 import type { UserProfile } from './api';
+import { me } from './api';
 
 const ACCESS = 'signcraft-access-token';
 const REFRESH = 'signcraft-refresh-token';
@@ -32,24 +33,26 @@ class AuthStore {
     }
   }
 
-  save(profile: UserProfile | any, accessToken: string, refreshToken: string) {
-    // If it's a full profile with wallet, use it directly
-    if (profile.wallet) {
+  /** Fetch /api/me with the stored access token. Clears auth on 401. */
+  async loadProfile(): Promise<boolean> {
+    const token = this.accessToken;
+    if (!token) return false;
+    try {
+      const profile = await me(token);
       this.profile = profile;
-    } else {
-      // If it's just basic user info, store it as a minimal profile
-      // Full profile will be loaded via /me endpoint
-      this.profile = null;
+      try { localStorage.setItem(PROFILE, JSON.stringify(profile)); } catch {}
+      return true;
+    } catch {
+      this.clear();
+      return false;
     }
+  }
+
+  save(accessToken: string, refreshToken: string) {
     try {
       localStorage.setItem(ACCESS, accessToken);
       localStorage.setItem(REFRESH, refreshToken);
-      if (this.profile) {
-        localStorage.setItem(PROFILE, JSON.stringify(this.profile));
-      }
-    } catch {
-      // Tokens live in memory for this page view only. Still usable.
-    }
+    } catch {}
   }
 
   clear() {

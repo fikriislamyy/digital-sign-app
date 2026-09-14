@@ -4,6 +4,7 @@
   import PasswordField from './PasswordField.svelte';
   import { register } from '../lib/api';
   import { auth } from '../lib/auth.svelte';
+  import { router } from '../lib/router.svelte';
 
   type Kind = 'personal' | 'organization';
   let kind = $state<Kind>('personal');
@@ -62,8 +63,8 @@
         organization_name: kind === 'organization' ? organization.trim() : undefined,
       });
 
-      auth.save(result.user, result.access_token, result.refresh_token);
-      window.location.hash = `#/verify?email=${encodeURIComponent(email.trim())}`;
+      auth.save(result.access_token, result.refresh_token);
+      router.navigate(`/verify?email=${encodeURIComponent(email.trim())}`);
     } catch (error) {
       formError = error instanceof Error ? error.message : 'Could not create account.';
     } finally {
@@ -123,6 +124,6 @@
 
   <p class="mt-8 text-center text-sm text-fg-muted">
     Already have an account?
-    <a href="#/login" class="font-medium text-accent transition-opacity duration-300 hover:opacity-80">Sign in</a>
+    <a href="/login" class="font-medium text-accent transition-opacity duration-300 hover:opacity-80">Sign in</a>
   </p>
 </AuthLayout>

@@ -20,7 +20,7 @@
 
       <div class="reveal flex flex-col sm:flex-row gap-4 justify-center mb-24" use:inview={{ delay: 300 }}>
         <a
-          href="#/app"
+          href="/dashboard"
           class="inline-flex items-center justify-center px-8 py-4 bg-accent text-white font-semibold rounded-lg transition-opacity duration-300 hover:opacity-90 active:opacity-75"
         >
           Start signing free

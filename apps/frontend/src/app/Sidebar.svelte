@@ -1,33 +1,24 @@
 <script lang="ts">
   import { auth } from '../lib/auth.svelte';
+  import { router } from '../lib/router.svelte';
 
   const sections = [
-    { label: 'Dashboard', href: '#/app/dashboard', icon: '📊' },
-    { label: 'Documents', href: '#/app/documents', icon: '📄' },
-    { label: 'Templates', href: '#/app/templates', icon: '📋' },
-    { label: 'Signings', href: '#/app/signings', icon: '✍️' },
-    { label: 'Analytics', href: '#/app/analytics', icon: '📈' },
-    { label: 'Team', href: '#/app/team', icon: '👥', rolesRequired: ['OWNER', 'ADMIN'] },
-    { label: 'Settings', href: '#/app/settings', icon: '⚙️' },
-    { label: 'Billing', href: '#/app/billing', icon: '💳', rolesRequired: ['OWNER'] },
-    { label: 'Audit Log', href: '#/app/audit', icon: '📋', rolesRequired: ['OWNER', 'ADMIN'] },
-    { label: 'Integrations', href: '#/app/integrations', icon: '🔗' },
-    { label: 'Help', href: '#/app/help', icon: '❓' },
-    { label: 'Profile', href: '#/app/profile', icon: '👤' },
+    { label: 'Dashboard', href: '/dashboard', icon: '📊' },
+    { label: 'Documents', href: '/documents', icon: '📄' },
+    { label: 'Templates', href: '/templates', icon: '📋' },
+    { label: 'Signings', href: '/signings', icon: '✍️' },
+    { label: 'Analytics', href: '/analytics', icon: '📈' },
+    { label: 'Team', href: '/team', icon: '👥', rolesRequired: ['OWNER', 'ADMIN'] },
+    { label: 'Settings', href: '/settings', icon: '⚙️' },
+    { label: 'Billing', href: '/billing', icon: '💳', rolesRequired: ['OWNER'] },
+    { label: 'Audit Log', href: '/audit', icon: '📋', rolesRequired: ['OWNER', 'ADMIN'] },
+    { label: 'Integrations', href: '/integrations', icon: '🔗' },
+    { label: 'Help', href: '/help', icon: '❓' },
+    { label: 'Profile', href: '/profile', icon: '👤' },
   ];
 
-  let currentPath = $state(window.location.hash);
-
-  $effect(() => {
-    const handler = () => {
-      currentPath = window.location.hash;
-    };
-    window.addEventListener('hashchange', handler);
-    return () => window.removeEventListener('hashchange', handler);
-  });
-
   function isActive(href: string) {
-    return currentPath.startsWith(href);
+    return router.path === href;
   }
 
   function canView(rolesRequired?: string[]) {
