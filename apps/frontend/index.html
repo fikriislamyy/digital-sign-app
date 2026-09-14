@@ -2,13 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M21.707 2.293a1 1 0 0 0-1.414 0l-1.8 1.8 3.207 3.207 1.8-1.8a1 1 0 0 0 0-1.414l-1.793-1.793ZM17.086 5.5 4.5 18.086V21.5h3.414L20.5 8.914 17.086 5.5ZM3 22h18v2H3v-2Z'/></svg>" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2310b981'><path d='M21.707 2.293a1 1 0 0 0-1.414 0l-1.8 1.8 3.207 3.207 1.8-1.8a1 1 0 0 0 0-1.414l-1.793-1.793ZM17.086 5.5 4.5 18.086V21.5h3.414L20.5 8.914 17.086 5.5ZM3 22h18v2H3v-2Z'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Digital Sign App - Fast, secure, cryptographic document signing platform powered by Bun, Elysia, Svelte, and PostgreSQL." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="SignCraft - Digital Signature Platform" />
+    <meta property="og:description" content="Digital Sign App - Fast, secure, cryptographic document signing platform powered by Bun, Elysia, Svelte, and PostgreSQL." />
+    <meta name="twitter:card" content="summary_large_image" />
     <title>SignCraft - Digital Signature Platform</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      try {
+        const saved = localStorage.getItem('signcraft-theme');
+        const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.classList.add('dark');
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="app"></div>
