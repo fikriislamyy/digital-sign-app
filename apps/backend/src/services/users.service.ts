@@ -9,6 +9,8 @@ export interface RegisterUserInput {
   name: string;
   email: string;
   password: string;
+  organization?: string;
+  phone?: string;
 }
 
 export interface RegisteredUserResult {
@@ -58,6 +60,8 @@ export async function registerUser(input: RegisterUserInput): Promise<Registered
       .insert(users)
       .values({
         name,
+        organization: input.organization?.trim(),
+        phone: input.phone?.trim(),
         email: normalizedEmail,
         password: hashedPassword,
       })

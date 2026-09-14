@@ -16,8 +16,8 @@
   --color-fg-muted: #707070;
   --color-accent: #5e6ad2;
   --color-accent-bright: #6872d9;
-  --color-gray-1: #333333;
-  --color-gray-2: #4a4a4a;
+  --color-gray-1: #e8e8e8;
+  --color-gray-2: #d4d4d4;
 
   /* Subtle shadows only. */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
@@ -73,8 +73,8 @@
 
   /* Minimal card surface. */
   .surface {
-    @apply rounded-xl border bg-black/[0.02];
-    @apply dark:border-white/[0.05] dark:bg-white/[0.02];
+    @apply rounded-xl border border-black/[0.08] bg-black/[0.02];
+    @apply dark:border-white/[0.08] dark:bg-white/[0.02];
     box-shadow: var(--shadow-card);
     transition: background-color 300ms var(--ease-out), box-shadow 300ms var(--ease-out);
   }
@@ -89,4 +89,13 @@
     @apply bg-gradient-to-b from-black via-black/95 to-black/80;
     @apply dark:from-white dark:via-white/98 dark:to-white/90;
   }
+
+  .input {
+    @apply w-full rounded-lg border border-black/[0.08] bg-bg-elevated px-4 py-3;
+    @apply text-fg placeholder:text-fg-muted/60;
+    @apply dark:border-white/[0.08];
+    transition: border-color 300ms var(--ease-out);
+  }
+  .input:hover { @apply border-black/[0.16] dark:border-white/[0.16]; }
+  .input[aria-invalid='true'] { @apply border-red-500/60; }
 }

@@ -10,6 +10,8 @@ export const usersRoutes = new Elysia({ prefix: '' })
           name: body.name,
           email: body.email,
           password: body.password,
+          organization: body.organization,
+          phone: body.phone,
         });
 
         return {
@@ -36,6 +38,8 @@ export const usersRoutes = new Elysia({ prefix: '' })
         name: t.String({ minLength: 1, description: 'User full name' }),
         email: t.String({ format: 'email', description: 'User valid email address' }),
         password: t.String({ minLength: 6, description: 'User account password' }),
+        organization: t.Optional(t.String({ maxLength: 255, description: 'Organization name' })),
+        phone: t.Optional(t.String({ maxLength: 32, description: 'Phone number' })),
       }),
       detail: {
         tags: ['Authentication & Users'],
