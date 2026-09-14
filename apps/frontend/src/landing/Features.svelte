@@ -1,6 +1,5 @@
 <script lang="ts">
   import { inview } from '../lib/inview';
-  import { spotlight } from '../lib/spotlight';
 
   const features = [
     {
@@ -28,41 +27,32 @@
       icon: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6',
     },
   ];
-
-  // Asymmetric bento. Card 0 is the hero tile, twice as tall and twice as wide.
-  // Single column on mobile; the spans only apply from md upward.
-  const spans = [
-    'md:col-span-4 md:row-span-2',
-    'md:col-span-2',
-    'md:col-span-2',
-    'md:col-span-6',
-  ];
 </script>
 
-<section id="features" class="relative border-t border-black/[0.06] py-16 dark:border-white/[0.06] md:py-24 lg:py-32">
+<section id="features" class="relative border-t border-gray-1 dark:border-gray-2 py-32 md:py-40 lg:py-48">
   <div class="mx-auto max-w-7xl px-4 sm:px-6">
-    <div class="mx-auto max-w-2xl text-center">
-      <p class="reveal font-mono text-xs tracking-widest uppercase text-fg-muted" use:inview>Architecture</p>
-      <h2 class="reveal mt-3 text-3xl font-semibold sm:text-4xl lg:text-5xl text-fg" use:inview>
+    <div class="mx-auto max-w-2xl text-center mb-20">
+      <p class="reveal font-mono text-xs tracking-widest uppercase text-fg-muted mb-4" use:inview>Architecture</p>
+      <h2 class="reveal text-5xl md:text-6xl lg:text-7xl font-bold text-fg mb-6" use:inview={{ delay: 100 }}>
         Built on a modern stack
       </h2>
-      <p class="reveal mt-5 text-base leading-relaxed text-fg-muted sm:text-lg" use:inview={{ delay: 80 }}>
-        Every layer chosen for speed and transactional integrity.
+      <p class="reveal text-lg text-fg-muted" use:inview={{ delay: 200 }}>
+        Every layer chosen for speed and reliability.
       </p>
     </div>
 
-    <ul class="mt-20 grid grid-cols-1 gap-4 md:grid-cols-6 lg:auto-rows-[180px]">
+    <ul class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
       {#each features as feature, i}
-        <li class="reveal {spans[i]}" use:inview={{ delay: i * 80 }}>
-          <article class="surface spotlight group flex h-full flex-col p-6 lg:p-8" use:spotlight>
-            <div class="mb-5 grid h-11 w-11 place-items-center rounded-xl border border-black/10 bg-black/[0.03] text-accent transition-transform duration-200 ease-expo group-hover:-translate-y-1 dark:border-white/10 dark:bg-white/[0.03]">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <li class="reveal" use:inview={{ delay: 300 + i * 100 }}>
+          <article class="surface flex flex-col h-full p-8 transition-all duration-300">
+            <div class="mb-6 flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d={feature.icon} />
               </svg>
             </div>
-            <span class="font-mono text-xs tracking-widest text-fg-muted">{feature.number}</span>
-            <h3 class="mt-2 text-xl font-semibold text-fg">{feature.title}</h3>
-            <p class="mt-3 text-sm leading-relaxed text-fg-muted">{feature.text}</p>
+            <span class="font-mono text-xs tracking-widest text-fg-muted mb-2">{feature.number}</span>
+            <h3 class="text-xl font-semibold text-fg mb-4">{feature.title}</h3>
+            <p class="text-sm text-fg-muted leading-relaxed flex-1">{feature.text}</p>
           </article>
         </li>
       {/each}

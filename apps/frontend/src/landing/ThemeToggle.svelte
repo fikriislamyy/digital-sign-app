@@ -9,13 +9,11 @@
   onclick={() => theme.toggle()}
   aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
   aria-pressed={isDark}
-  class="relative grid h-10 w-10 place-items-center rounded-lg border border-black/[0.06] bg-black/[0.02] transition-all duration-200 ease-expo hover:scale-110 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:outline-none dark:border-white/[0.06] dark:bg-white/[0.02]"
+  class="grid h-10 w-10 place-items-center rounded-lg transition-opacity duration-300 hover:opacity-70 focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:outline-none"
 >
-  <!-- Sun and moon are stacked; opacity and rotation cross-fade between them. -->
+  <!-- Sun icon -->
   <svg
-    class="absolute h-5 w-5 text-amber-500 transition-all duration-500 {isDark
-      ? 'scale-50 rotate-90 opacity-0'
-      : 'scale-100 rotate-0 opacity-100'}"
+    class="absolute h-5 w-5 text-amber-500 transition-opacity duration-300 {isDark ? 'opacity-0' : 'opacity-100'}"
     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
     stroke-linecap="round" aria-hidden="true"
   >
@@ -23,10 +21,9 @@
     <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
   </svg>
 
+  <!-- Moon icon -->
   <svg
-    class="absolute h-5 w-5 text-fg transition-all duration-500 {isDark
-      ? 'scale-100 rotate-0 opacity-100'
-      : 'scale-50 -rotate-90 opacity-0'}"
+    class="absolute h-5 w-5 text-fg transition-opacity duration-300 {isDark ? 'opacity-100' : 'opacity-0'}"
     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
     stroke-linecap="round" aria-hidden="true"
   >

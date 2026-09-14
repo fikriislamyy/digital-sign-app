@@ -9,51 +9,32 @@
   --font-body: 'Inter', 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
 
   /* Light is the default; the .dark block below overrides. */
-  --color-bg-deep: #f4f5f8;
-  --color-bg-base: #fcfcfd;
+  --color-bg-deep: #f5f5f5;
+  --color-bg-base: #fafafa;
   --color-bg-elevated: #ffffff;
-  --color-fg: #08090a;
-  --color-fg-muted: #60646c;
+  --color-fg: #1a1a1a;
+  --color-fg-muted: #707070;
   --color-accent: #5e6ad2;
-  --color-accent-bright: #4e58be;
+  --color-accent-bright: #6872d9;
+  --color-gray-1: #333333;
+  --color-gray-2: #4a4a4a;
 
-  /* Multi-layer shadows. Never a single shadow. */
-  --shadow-card:
-    0 0 0 1px rgb(255 255 255 / 0.06),
-    0 2px 20px rgb(0 0 0 / 0.4),
-    0 0 40px rgb(0 0 0 / 0.2);
-  --shadow-card-hover:
-    0 0 0 1px rgb(255 255 255 / 0.1),
-    0 8px 40px rgb(0 0 0 / 0.5),
-    0 0 80px rgb(94 106 210 / 0.1);
-  --shadow-accent:
-    0 0 0 1px rgb(94 106 210 / 0.5),
-    0 4px 12px rgb(94 106 210 / 0.3),
-    inset 0 1px 0 0 rgb(255 255 255 / 0.2);
+  /* Subtle shadows only. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-card-hover: 0 2px 4px rgb(0 0 0 / 0.4);
 
-  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
-
-  --animate-float: float 9s ease-in-out infinite;
-  --animate-pulse-glow: pulse-glow 8s ease-in-out infinite;
-
-  @keyframes float {
-    0%, 100% { transform: translateY(0) rotate(0deg); }
-    50%      { transform: translateY(-20px) rotate(1deg); }
-  }
-  @keyframes pulse-glow {
-    0%, 100% { opacity: 0.6; }
-    50%      { opacity: 1; }
-  }
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Dark is the canonical mode. */
 :root.dark {
-  --color-bg-deep: #020203;
-  --color-bg-base: #050506;
-  --color-bg-elevated: #0a0a0c;
-  --color-fg: #ededef;
-  --color-fg-muted: #8a8f98;
-  --color-accent-bright: #6872d9;
+  --color-bg-deep: #0a0a0a;
+  --color-bg-base: #0f0f0f;
+  --color-bg-elevated: #1a1a1a;
+  --color-fg: #fafafa;
+  --color-fg-muted: #a0a0a0;
+  --color-gray-1: #1f1f1f;
+  --color-gray-2: #2a2a2a;
 }
 
 @layer base {
@@ -83,72 +64,29 @@
 }
 
 @layer utilities {
-  /* Scroll reveal, unchanged from the landing ticket. */
+  /* Subtle fade-in reveal. No movement. */
   .reveal {
     opacity: 0;
-    transform: translateY(24px);
-    transition:
-      opacity 600ms var(--ease-expo),
-      transform 600ms var(--ease-expo);
+    transition: opacity 400ms var(--ease-out);
   }
-  .reveal.is-visible { opacity: 1; transform: none; }
+  .reveal.is-visible { opacity: 1; }
 
-  /* Card surface. One class so ten components stop repeating it. */
+  /* Minimal card surface. */
   .surface {
-    @apply rounded-2xl border border-black/[0.06] bg-black/[0.02];
-    @apply dark:border-white/[0.06] dark:bg-gradient-to-b dark:from-white/[0.08] dark:to-white/[0.02];
+    @apply rounded-xl border bg-black/[0.02];
+    @apply dark:border-white/[0.05] dark:bg-white/[0.02];
     box-shadow: var(--shadow-card);
-    transition:
-      border-color 250ms var(--ease-expo),
-      box-shadow 250ms var(--ease-expo),
-      transform 250ms var(--ease-expo);
+    transition: background-color 300ms var(--ease-out), box-shadow 300ms var(--ease-out);
   }
   .surface:hover {
-    @apply border-black/[0.1] dark:border-white/[0.1];
+    @apply bg-black/[0.04] dark:bg-white/[0.04];
     box-shadow: var(--shadow-card-hover);
-    transform: translateY(-4px);
   }
 
-  /* Mouse-tracking spotlight. The `spotlight` action sets --mx and --my. */
-  .spotlight { position: relative; }
-  .spotlight::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 250ms var(--ease-expo);
-    background: radial-gradient(
-      300px circle at var(--mx, 50%) var(--my, 50%),
-      rgb(94 106 210 / 0.15),
-      transparent 70%
-    );
-  }
-  .spotlight:hover::before { opacity: 1; }
-
-  /* Display type gets a vertical gradient fill for dimensionality. */
+  /* Display type gets a vertical gradient. */
   .text-gradient {
     @apply bg-clip-text text-transparent;
-    @apply bg-gradient-to-b from-black via-black/90 to-black/60;
-    @apply dark:from-white dark:via-white/95 dark:to-white/70;
-  }
-
-  /* 64px technical grid. */
-  .grid-overlay {
-    background-image:
-      linear-gradient(to right, currentColor 1px, transparent 1px),
-      linear-gradient(to bottom, currentColor 1px, transparent 1px);
-    background-size: 64px 64px;
-  }
-
-  /* Noise, as an inline SVG so it costs no request. */
-  .noise::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.015;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    @apply bg-gradient-to-b from-black via-black/95 to-black/80;
+    @apply dark:from-white dark:via-white/98 dark:to-white/90;
   }
 }

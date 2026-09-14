@@ -1,63 +1,41 @@
 <script lang="ts">
   import DeviceMockup from './DeviceMockup.svelte';
   import { inview } from '../lib/inview';
-
-  let scrollY = $state(0);
-  let reduced = $state(false);
-
-  $effect(() => {
-    reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  });
-
-  // Fade out over the first half-screen, shrink slightly, drift down.
-  // Clamped so the values stay sane past the fold.
-  let progress = $derived(reduced ? 0 : Math.min(scrollY / (window.innerHeight * 0.5), 1));
-  let heroOpacity = $derived(1 - progress);
-  let heroScale = $derived(1 - progress * 0.05);
-  let heroShift = $derived(progress * 100);
 </script>
 
-<svelte:window bind:scrollY />
-
-<section id="hero" class="relative flex min-h-screen items-center pt-32 pb-20">
-  <div
-    class="mx-auto w-full max-w-7xl px-4 sm:px-6"
-    style="opacity: {heroOpacity}; transform: translateY({heroShift}px) scale({heroScale});"
-  >
-    <div class="mx-auto max-w-3xl text-center">
-      <p class="reveal inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-4 py-1.5 font-mono text-xs tracking-widest text-accent uppercase" use:inview>
-        <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
-        Next-Gen Digital Signatures
+<section id="hero" class="relative flex min-h-screen items-center pt-40 pb-32">
+  <div class="mx-auto w-full max-w-7xl px-4 sm:px-6">
+    <div class="mx-auto max-w-4xl text-center">
+      <p class="reveal font-mono text-xs tracking-widest uppercase text-fg-muted mb-6" use:inview>
+        Digital Signature Platform
       </p>
 
-      <h1 class="reveal text-gradient mt-8 text-4xl leading-[1.05] font-semibold tracking-[-0.03em] sm:text-6xl lg:text-8xl" use:inview={{ delay: 80 }}>
-        High-Assurance Digital Signature Platform
+      <h1 class="reveal text-gradient text-7xl md:text-8xl lg:text-9xl font-bold leading-none tracking-tight mb-8" use:inview={{ delay: 100 }}>
+        High-Assurance Signatures
       </h1>
 
-      <p class="reveal mx-auto mt-8 max-w-2xl text-base leading-relaxed text-fg-muted sm:text-lg lg:text-xl" use:inview={{ delay: 160 }}>
-        Engineered with Bun, ElysiaJS, Svelte 5, and Drizzle ORM + PostgreSQL
-        for extreme speed and transactional integrity.
+      <p class="reveal text-lg md:text-xl text-fg-muted leading-relaxed mb-12 max-w-2xl mx-auto" use:inview={{ delay: 200 }}>
+        Built on Bun, ElysiaJS, Svelte 5, and PostgreSQL for extreme speed and cryptographic integrity.
       </p>
 
-      <div class="reveal mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row" use:inview={{ delay: 240 }}>
+      <div class="reveal flex flex-col sm:flex-row gap-4 justify-center mb-24" use:inview={{ delay: 300 }}>
         <a
           href="#/app"
-          class="shadow-accent inline-flex w-full items-center justify-center rounded-lg bg-accent px-7 py-3.5 text-sm font-medium text-white transition-all duration-200 ease-expo hover:bg-accent-bright active:scale-[0.98] sm:w-auto"
+          class="inline-flex items-center justify-center px-8 py-4 bg-accent text-white font-semibold rounded-lg transition-opacity duration-300 hover:opacity-90 active:opacity-75"
         >
           Start signing free
         </a>
-
         <a
           href="#features"
-          class="inline-flex w-full items-center justify-center rounded-lg bg-black/[0.04] px-7 py-3.5 text-sm font-medium text-fg shadow-[inset_0_1px_0_0_rgb(255_255_255/0.1)] transition-all duration-200 ease-expo hover:bg-black/[0.07] active:scale-[0.98] sm:w-auto dark:bg-white/[0.05] dark:hover:bg-white/[0.08]"
+          class="inline-flex items-center justify-center px-8 py-4 bg-gray-1 text-fg font-semibold rounded-lg transition-opacity duration-300 hover:opacity-80 dark:bg-gray-2 dark:text-fg"
         >
           See how it works
         </a>
       </div>
-    </div>
 
-    <div class="reveal mt-24" use:inview={{ delay: 320 }}>
-      <DeviceMockup />
+      <div class="reveal" use:inview={{ delay: 400 }}>
+        <DeviceMockup />
+      </div>
     </div>
   </div>
 </section>

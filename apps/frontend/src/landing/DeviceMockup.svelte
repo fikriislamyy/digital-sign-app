@@ -1,7 +1,7 @@
-<div class="relative mx-auto w-full max-w-3xl animate-float" aria-hidden="true">
+<div class="relative mx-auto w-full max-w-3xl" aria-hidden="true">
   <!-- MacBook -->
-  <div class="rounded-2xl border border-black/[0.12] bg-slate-800 p-2.5 shadow-2xl shadow-accent/10 dark:border-white/10">
-    <div class="overflow-hidden rounded-xl bg-slate-950 aspect-[16/10]">
+  <div class="rounded-xl border border-gray-2 bg-slate-800 p-2.5 shadow-lg shadow-black/20">
+    <div class="overflow-hidden rounded-lg bg-slate-950 aspect-[16/10]">
       <div class="flex items-center gap-1.5 border-b border-white/5 px-3 py-2">
         <span class="h-2.5 w-2.5 rounded-full bg-red-400/80"></span>
         <span class="h-2.5 w-2.5 rounded-full bg-amber-400/80"></span>
@@ -13,7 +13,7 @@
         <div class="h-2 w-2/3 rounded-full bg-white/10"></div>
         <div class="mt-5 grid grid-cols-3 gap-3">
           {#each Array(3) as _}
-            <div class="rounded-xl border border-white/5 bg-white/5 p-3">
+            <div class="rounded-lg border border-white/5 bg-white/5 p-3">
               <div class="mb-2 h-6 w-6 rounded-lg bg-accent/20"></div>
               <div class="h-1.5 w-full rounded-full bg-white/10"></div>
             </div>
@@ -22,11 +22,11 @@
       </div>
     </div>
   </div>
-  <div class="mx-auto h-2.5 w-1/3 rounded-b-xl bg-slate-300 dark:bg-slate-700"></div>
+  <div class="mx-auto h-2.5 w-1/3 rounded-b-lg bg-slate-300 dark:bg-slate-700"></div>
 
-  <!-- iPhone, overlapping the laptop's lower-left corner -->
-  <div class="absolute -bottom-8 -left-2 w-28 rounded-[1.75rem] border border-black/[0.12] bg-slate-800 p-1.5 shadow-2xl sm:-left-10 sm:w-36 dark:border-white/10">
-    <div class="overflow-hidden rounded-[1.35rem] bg-slate-950 aspect-[9/19]">
+  <!-- iPhone -->
+  <div class="absolute -bottom-8 -left-2 w-28 rounded-[1.5rem] border border-gray-2 bg-slate-800 p-1.5 shadow-lg shadow-black/20 sm:-left-10 sm:w-36">
+    <div class="overflow-hidden rounded-[1.2rem] bg-slate-950 aspect-[9/19]">
       <div class="mx-auto mt-1.5 h-1 w-8 rounded-full bg-white/20"></div>
       <div class="space-y-2 p-3">
         <div class="h-1.5 w-2/3 rounded-full bg-gradient-to-r from-accent to-indigo-500"></div>
