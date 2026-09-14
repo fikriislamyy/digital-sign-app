@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, jsonb, integer } from 'drizzle-orm/pg-c
 import { users } from '../models/users.model';
 
 export * from '../models/users.model';
+export * from '../models/otp-codes.model';
 
 export const documents = pgTable('documents', {
   id: uuid('id').defaultRandom().primaryKey(),

@@ -4,6 +4,7 @@ import { swagger } from '@elysiajs/swagger';
 import { db } from './db';
 import { documents, signatures } from './db/schema';
 import { usersRoutes } from './routes/users.routes';
+import { emailVerificationRoutes } from './routes/email-verification.routes';
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
@@ -28,6 +29,7 @@ export const app = new Elysia()
   .group('/api', (app) =>
     app
       .use(usersRoutes)
+      .use(emailVerificationRoutes)
       .get('/health', () => ({
         status: 'ok',
         service: 'digital-sign-backend',
