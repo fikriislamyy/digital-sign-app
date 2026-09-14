@@ -48,7 +48,7 @@ export const usersRoutes = new Elysia({ prefix: '' })
     '/login',
     async ({ body, set }) => {
       try {
-        await loginUser({
+        const result = await loginUser({
           email: body.email,
           password: body.password,
         });
@@ -56,6 +56,11 @@ export const usersRoutes = new Elysia({ prefix: '' })
         return {
           success: true,
           message: 'User logged in successfully',
+          data: {
+            user: result.user,
+            access_token: result.accessToken,
+            refresh_token: result.refreshToken,
+          },
         };
       } catch (error: any) {
         if (error?.message === 'Invalid email or password') {
@@ -79,7 +84,7 @@ export const usersRoutes = new Elysia({ prefix: '' })
       detail: {
         tags: ['Authentication & Users'],
         summary: 'Login user',
-        description: 'Validates user credentials and logs in',
+        description: 'Validates user credentials and returns an access token and a refresh token',
       },
     }
   );

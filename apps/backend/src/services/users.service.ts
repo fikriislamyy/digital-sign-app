@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { users } from '../models/users.model';
 import { createAndSendOtp } from './email-verification.service';
+import { createSession, signAccessToken, generateRefreshToken } from './sessions.service';
 
 export interface RegisterUserInput {
   name: string;
@@ -107,10 +108,19 @@ export interface LoginUserInput {
   password: string;
 }
 
+export interface LoginUserResult {
+  user: {
+    id: number;
+    email: string;
+  };
+  accessToken: string;
+  refreshToken: string;
+}
+
 /**
- * Validate user credentials against the database (or in-memory fallback).
+ * Validate user credentials and open a session (or in-memory fallback).
  */
-export async function loginUser(input: LoginUserInput): Promise<true> {
+export async function loginUser(input: LoginUserInput): Promise<LoginUserResult> {
   const normalizedEmail = input.email.trim().toLowerCase();
   const password = input.password;
 
@@ -131,7 +141,13 @@ export async function loginUser(input: LoginUserInput): Promise<true> {
       throw new Error('Invalid email or password');
     }
 
-    return true;
+    const session = await createSession(user.id);
+
+    return {
+      user: { id: user.id, email: user.email },
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+    };
   } catch (error: any) {
     if (error?.message === 'Invalid email or password') {
       throw error;
@@ -149,6 +165,11 @@ export async function loginUser(input: LoginUserInput): Promise<true> {
       throw new Error('Invalid email or password');
     }
 
-    return true;
+    // Dev fallback: hand out real tokens but persist no session row.
+    return {
+      user: { id: memoryUser.id, email: memoryUser.email },
+      accessToken: await signAccessToken(memoryUser.id),
+      refreshToken: generateRefreshToken(),
+    };
   }
 }
